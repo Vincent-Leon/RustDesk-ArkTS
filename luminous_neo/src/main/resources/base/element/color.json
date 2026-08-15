@@ -1,0 +1,18 @@
+{
+  "color": [
+    { "name": "lm_base", "value": "#F3F4F6" },
+    { "name": "lm_shadow_dark", "value": "#6698A3B0" },
+    { "name": "lm_shadow_light", "value": "#FFFFFFFF" },
+    { "name": "lm_field_background", "value": "#EEF2F7" },
+    { "name": "lm_field_border", "value": "#D5DDE7" },
+    { "name": "lm_text_primary", "value": "#001F3F" },
+    { "name": "lm_text_secondary", "value": "#99001F3F" },
+    { "name": "lm_text_disabled", "value": "#687887" },
+    { "name": "lm_accent", "value": "#087E8B" },
+    { "name": "lm_danger", "value": "#A33B46" },
+    { "name": "lm_on_accent", "value": "#FFFFFF" },
+    { "name": "lm_disabled_background", "value": "#E5EAF0" },
+    { "name": "lm_disabled_text", "value": "#A4AFBB" },
+    { "name": "lm_divider", "value": "#24001F3F" }
+  ]
+}

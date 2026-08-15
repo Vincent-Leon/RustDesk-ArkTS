@@ -53,6 +53,8 @@ export interface NativeEvent {
   platform?: string;
   version?: string;
   keyboard?: string;
+  /** peer_info / sync_platform_additions 携带的远端平台附加信息（JSON 字符串） */
+  platform_additions?: string;
   displays?: string;
   resolutions?: string;
   current_display?: string;

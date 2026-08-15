@@ -26,6 +26,8 @@ export interface SessionToolbarProps {
   softKeyboardVisible: boolean;
   audioAvailable: boolean;
   audioMuted: boolean;
+  privacyModeAvailable: boolean;
+  privacyModeOn: boolean;
   wideLayout: boolean;
   transformSummary: string;
   transformMode: boolean;
@@ -43,6 +45,7 @@ export interface SessionToolbarProps {
   onToggleSoftKeyboard: () => void;
   onToggleAndroidNavigation: () => void;
   onAudioChange: (enabled: boolean) => void;
+  onPrivacyModeChange: (enabled: boolean) => void;
   onDisconnect: () => void;
   onCollapse: () => void;
   onMinimizeWindow: () => void;
@@ -74,6 +77,8 @@ export struct SessionToolbar {
   @Param softKeyboardVisible: boolean = false;
   @Param audioAvailable: boolean = false;
   @Param audioMuted: boolean = false;
+  @Param privacyModeAvailable: boolean = false;
+  @Param privacyModeOn: boolean = false;
   @Param wideLayout: boolean = false;
   @Param transformSummary: string = '100%';
   @Param transformMode: boolean = false;
@@ -92,6 +97,7 @@ export struct SessionToolbar {
   @Event onToggleSoftKeyboard: () => void = () => {};
   @Event onToggleAndroidNavigation: () => void = () => {};
   @Event onAudioChange: (enabled: boolean) => void = (_enabled: boolean) => {};
+  @Event onPrivacyModeChange: (enabled: boolean) => void = (_enabled: boolean) => {};
   @Event onDisconnect: () => void = () => {};
   @Event onCollapse: () => void = () => {};
   @Event onMinimizeWindow: () => void = () => {};
@@ -193,6 +199,44 @@ export struct SessionToolbar {
       this.displayedRelativeMouseMode = !this.displayedRelativeMouseMode;
       this.onTogglePointerMode();
     });
+  }
+
+  @Builder
+  private PrivacyToggle() {
+    Row({ space: $r('app.float.space_6') }) {
+      Text(this.privacyModeAvailable ? '隐私模式' : '不支持')
+        .layoutWeight(1)
+        .fontSize($r('app.float.font_label'))
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.privacyModeAvailable
+          ? $r('app.color.neu_text_primary')
+          : $r('app.color.neu_text_disabled'))
+        .maxLines(1);
+
+      Toggle({
+        type: ToggleType.Switch,
+        isOn: this.privacyModeOn,
+      })
+        .enabled(this.privacyModeAvailable)
+        .selectedColor($r('app.color.brand_primary'))
+        .switchPointColor($r('app.color.white'))
+        .onChange((enabled: boolean): void => {
+          this.onPrivacyModeChange(enabled);
+        });
+    }
+    .layoutWeight(1)
+    .height(this.actionHeight())
+    .padding({ left: $r('app.float.space_12'), right: $r('app.float.space_8') })
+    .backgroundColor($r('app.color.mica_control'))
+    .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN, {
+      adaptiveColor: AdaptiveColor.DEFAULT,
+      scale: 0.56,
+    })
+    .border({ width: 1, color: $r('app.color.mica_border') })
+    .borderRadius($r('app.float.radius_14'))
+    .shadow(ShadowStyle.OUTER_DEFAULT_SM)
+    .opacity(this.privacyModeAvailable ? 1 : 0.72)
+    .accessibilityText(this.privacyModeOn ? '隐私模式已开启' : '隐私模式已关闭');
   }
 
   @Builder
@@ -499,6 +543,7 @@ export struct SessionToolbar {
             onClick: () => this.onOpenChat(),
           })
           this.AudioToggle()
+          this.PrivacyToggle()
         }
         .width('100%');
 
@@ -563,6 +608,7 @@ export struct SessionToolbar {
 
         Row({ space: $r('app.float.space_8') }) {
           this.AudioToggle()
+          this.PrivacyToggle()
           this.DangerAction('断开连接')
         }
         .width('100%');

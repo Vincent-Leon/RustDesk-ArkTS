@@ -288,6 +288,9 @@ struct RustDeskIndex {
   @Local rememberPassword: boolean = false;
 
   @Local activeSessionId: string = '';
+  /** 远端上报的隐私模式实现标识；为空表示远端不支持，开关隐藏 */
+  @Local privacyModeImplKey: string = '';
+  @Local privacyModeOn: boolean = false;
   @Local activeCoreSessionId: string = '';
   @Local activeSessionKind: PrimarySessionKind = 'remote_control';
   @Local sessionPhase: string = 'idle';
@@ -967,6 +970,8 @@ struct RustDeskIndex {
   }
 
   private clearActiveSessionHandoffState(): void {
+    this.privacyModeImplKey = '';
+    this.privacyModeOn = false;
     this.disableRemoteSessionSharing();
     this.activeSessionPassword = '';
     this.activeSessionShareTarget = '';
@@ -5471,7 +5476,71 @@ struct RustDeskIndex {
     );
   }
 
+  /**
+   * 从 platform_additions 中取出远端支持的隐私模式实现。
+   * Rust 侧序列化为 [[implKey, displayName], ...]，只有 Windows 与 macOS 会上报。
+   */
+  private extractPrivacyModeImplKey(raw: string): string {
+    if (raw.length === 0) {
+      return '';
+    }
+    try {
+      const parsed = JSON.parse(raw) as Record<string, Object>;
+      const impls = parsed['supported_privacy_mode_impl'];
+      if (impls === undefined || impls === null || !Array.isArray(impls)) {
+        return '';
+      }
+      const list = impls as Array<Object>;
+      if (list.length === 0) {
+        return '';
+      }
+      const first = list[0];
+      if (Array.isArray(first)) {
+        const pair = first as Array<Object>;
+        return pair.length > 0 ? String(pair[0]) : '';
+      }
+      return String(first);
+    } catch (error) {
+      hilog.warn(DOMAIN, TAG, 'privacy mode impl parse failed: %{public}s', String(error));
+      return '';
+    }
+  }
+
+  private refreshPrivacyModeState(): void {
+    if (this.activeSessionId.length === 0) {
+      this.privacyModeOn = false;
+      return;
+    }
+    this.privacyModeOn = this.nativeSessionBridge.getToggleOption(this.activeSessionId, 'privacy-mode');
+  }
+
+  private setPrivacyModeEnabled(enabled: boolean): void {
+    if (this.activeSessionId.length === 0 || this.privacyModeImplKey.length === 0) {
+      return;
+    }
+    // 状态以远端回推的 update_privacy_mode 为准，这里不做乐观更新
+    this.nativeSessionBridge.togglePrivacyMode(this.activeSessionId, this.privacyModeImplKey, enabled);
+    hilog.info(DOMAIN, TAG,
+      'privacy mode requested: impl=%{public}s on=%{public}s',
+      this.privacyModeImplKey, String(enabled));
+  }
+
   private handleSessionEvent(event: NativeEvent): void {
+    if (event.name === 'sync_platform_additions' || event.name === 'peer_info') {
+      const additions = event.platform_additions;
+      if (additions !== undefined && additions.length > 0) {
+        const implKey = this.extractPrivacyModeImplKey(additions);
+        if (implKey !== this.privacyModeImplKey) {
+          this.privacyModeImplKey = implKey;
+          hilog.info(DOMAIN, TAG, 'privacy mode impl key: %{public}s', implKey.length > 0 ? implKey : '(none)');
+        }
+      }
+    }
+    if (event.name === 'update_privacy_mode') {
+      this.refreshPrivacyModeState();
+      hilog.info(DOMAIN, TAG, 'privacy mode state: %{public}s', String(this.privacyModeOn));
+      return;
+    }
     if (event.name === 'close') {
       this.handleRemoteDisconnect('远端连接已结束');
       return;
@@ -5622,6 +5691,16 @@ struct RustDeskIndex {
       this.sessionMessage = text;
       this.connectionSummary = '已连接，等待远端首帧';
       this.errorText = '';
+      return;
+    }
+    // 隐私模式用 msgbox 上报进入/退出/失败，都是信息性通知而非断开。
+    // 落到下面的兜底分支会误判成远端断开并主动关闭会话。
+    if (title === 'Privacy mode') {
+      this.sessionMessage = message;
+      this.refreshPrivacyModeState();
+      hilog.info(DOMAIN, TAG,
+        'privacy mode notice: %{public}s state=%{public}s',
+        text, String(this.privacyModeOn));
       return;
     }
     this.handleRemoteDisconnect(message);
@@ -6077,6 +6156,8 @@ struct RustDeskIndex {
             softKeyboardVisible: this.softKeyboardVisible,
             audioAvailable: this.remoteAudioState.available,
             audioMuted: this.remoteAudioState.muted,
+            privacyModeAvailable: this.privacyModeImplKey.length > 0,
+            privacyModeOn: this.privacyModeOn,
             wideLayout: this.activeSessionKind === 'remote_control' && this.previewViewWidth >= 700,
             transformSummary: this.previewTransformSummary(),
             transformMode: this.previewTransformMode,
@@ -6090,6 +6171,7 @@ struct RustDeskIndex {
             onResetTransform: () => this.resetPreviewViewTransform(),
             onOpenChat: () => this.openChatDrawer(),
             onAudioChange: (enabled: boolean) => this.setRemoteAudioEnabled(enabled),
+            onPrivacyModeChange: (enabled: boolean) => this.setPrivacyModeEnabled(enabled),
             onOpenDisplay: () => this.openDisplaySheet(),
             onOpenQuality: () => this.openQualitySheet(),
             onToggleSoftKeyboard: () => this.toggleSoftKeyboard(),

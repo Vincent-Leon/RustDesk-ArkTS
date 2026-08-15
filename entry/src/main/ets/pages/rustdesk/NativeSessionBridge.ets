@@ -32,6 +32,7 @@ export interface NativeSessionBridge {
   cancelTransfer(sessionId: string, actId: number): ActionResponse;
   getToggleOption(sessionId: string, option: string): boolean;
   toggleOption(sessionId: string, option: string): void;
+  togglePrivacyMode(sessionId: string, implKey: string, on: boolean): void;
   getRemoteAudioState(sessionId: string): RemoteAudioState;
   setRemoteAudioMuted(sessionId: string, muted: boolean): boolean;
 }
@@ -142,6 +143,14 @@ export class RustDeskNativeSessionBridge implements NativeSessionBridge {
 
   toggleOption(sessionId: string, option: string): void {
     native.sessionToggleOption(sessionId, option);
+  }
+
+  /**
+   * 上报了 supported_privacy_mode_impl 的远端（Windows / macOS）不再处理
+   * toggleOption('privacy-mode')，只认这条带实现标识的消息。
+   */
+  togglePrivacyMode(sessionId: string, implKey: string, on: boolean): void {
+    native.sessionTogglePrivacyMode(sessionId, implKey, on);
   }
 
   getRemoteAudioState(sessionId: string): RemoteAudioState {

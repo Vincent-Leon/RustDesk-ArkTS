@@ -143,6 +143,9 @@ const RENDER_STALL_RECOVERY_COOLDOWN_MS = 5000;
 const WAITING_FOR_IMAGE_TEXT = 'Connected, waiting for image...';
 const PREVIEW_INPUT_FOCUS_ID = 'rustdesk-preview-input-layer';
 const IME_INPUT_FOCUS_ID = 'rustdesk-ime-input-layer';
+/** 断开前等待远端确认隐私模式已撤销的上限与轮询间隔 */
+const PRIVACY_MODE_OFF_TIMEOUT_MS = 900;
+const PRIVACY_MODE_OFF_POLL_MS = 60;
 const SESSION_OVERLAY_TRANSITION_CHAT = 'rustdesk-session-overlay-chat';
 const SESSION_OVERLAY_TRANSITION_DISPLAY = 'rustdesk-session-overlay-display';
 const SESSION_OVERLAY_TRANSITION_QUALITY = 'rustdesk-session-overlay-quality';
@@ -2380,6 +2383,46 @@ struct RustDeskIndex {
     this.closeSession('已取消密码输入');
   }
 
+  /**
+   * 断开前先撤销远端隐私模式，并等待回执。
+   *
+   * 临时规避上游的一个竞态：macOS 被控端的「会话结束后锁屏」是注入 ⌃⌘Q
+   * （input_service.rs 的 macOS 分支），而隐私模式的黑色覆盖层是原生 AppKit 窗口。
+   * 上游在连接关闭时确实先撤隐私模式再锁屏，但两者互不等待——Rust 侧
+   * MacSetPrivacyMode(false) 同步返回时，窗口未必已经从屏幕上撤掉，随后另起线程
+   * 注入的按键就被覆盖层吃掉，导致开着隐私模式断开反而不会锁屏。
+   *
+   * 正确的修复在上游被控端，这里只是把撤销提前到会话关闭之前，让竞态不再发生。
+   */
+  private async ensurePrivacyModeOffBeforeClose(sessionId: string): Promise<void> {
+    if (sessionId.length === 0 || !this.privacyModeOn || this.privacyModeImplKey.length === 0) {
+      return;
+    }
+    try {
+      this.nativeSessionBridge.togglePrivacyMode(sessionId, this.privacyModeImplKey, false);
+    } catch (error) {
+      hilog.warn(DOMAIN, TAG, 'privacy mode off before close failed: %{public}s', String(error));
+      return;
+    }
+    for (let waited = 0; waited < PRIVACY_MODE_OFF_TIMEOUT_MS; waited += PRIVACY_MODE_OFF_POLL_MS) {
+      await new Promise<void>((resolve: () => void): void => {
+        setTimeout(() => resolve(), PRIVACY_MODE_OFF_POLL_MS);
+      });
+      let stillOn = true;
+      try {
+        stillOn = this.nativeSessionBridge.getToggleOption(sessionId, 'privacy-mode');
+      } catch (error) {
+        return;
+      }
+      if (!stillOn) {
+        this.privacyModeOn = false;
+        hilog.info(DOMAIN, TAG, 'privacy mode off confirmed after %{public}dms', waited + PRIVACY_MODE_OFF_POLL_MS);
+        return;
+      }
+    }
+    hilog.warn(DOMAIN, TAG, 'privacy mode off not confirmed within timeout, closing anyway');
+  }
+
   private async closeSession(reason?: string, preserveConnectionFailure: boolean = false): Promise<void> {
     if (this.sessionCloseInFlight) {
       return;
@@ -2394,6 +2437,7 @@ struct RustDeskIndex {
       }
       const sessionId = this.activeSessionId;
       hilog.info(DOMAIN, TAG, 'closeSession sessionId=%{public}s reason=%{public}s', sessionId, reason ?? '');
+      await this.ensurePrivacyModeOffBeforeClose(sessionId);
       this.releaseSoftKeyboardKeys();
       if (this.relativeMouseMode && sessionId) {
         this.syncRelativeMouseMode(false);

@@ -142,6 +142,7 @@ const RENDER_STALL_THRESHOLD_MS = 3500;
 const RENDER_STALL_RECOVERY_COOLDOWN_MS = 5000;
 const WAITING_FOR_IMAGE_TEXT = 'Connected, waiting for image...';
 const PREVIEW_INPUT_FOCUS_ID = 'rustdesk-preview-input-layer';
+const IME_INPUT_FOCUS_ID = 'rustdesk-ime-input-layer';
 const SESSION_OVERLAY_TRANSITION_CHAT = 'rustdesk-session-overlay-chat';
 const SESSION_OVERLAY_TRANSITION_DISPLAY = 'rustdesk-session-overlay-display';
 const SESSION_OVERLAY_TRANSITION_QUALITY = 'rustdesk-session-overlay-quality';
@@ -327,6 +328,10 @@ struct RustDeskIndex {
   @Local rgbaFallbackActive: boolean = false;
   @Local isFoldHoverMode: boolean = false;
   @Local softKeyboardVisible: boolean = false;
+  /** 系统输入法转发通道：输入框可见状态、当前草稿、已发送给远端的部分 */
+  @Local imeInputVisible: boolean = false;
+  @Local imeDraft: string = '';
+  private imeSentText: string = '';
   @Local softKeyboardDockTop: boolean = false;
   @Local softKeyboardX: number = 0;
   @Local softKeyboardY: number = 12;
@@ -4807,6 +4812,88 @@ struct RustDeskIndex {
     this.getInputController().handleTouchEvent(event);
   }
 
+  /**
+   * 把系统输入法产生的文本转发给远端。
+   *
+   * RemoteSoftKeyboard 是手写键位网格，表里只有字母数字和功能键，标点、中文、
+   * Emoji 都打不出来。这里改走系统输入法：用一个可见输入框承接 IME，再通过
+   * sessionInputString 把文本发出去，功能键仍由 RemoteSoftKeyboard 负责。
+   */
+  private sendTextToRemote(text: string): boolean {
+    if (text.length === 0 || !this.isRemoteControlSessionActive()) {
+      return false;
+    }
+    try {
+      const response = this.parseResponse(native.sessionInputString(this.activeSessionId, text));
+      if (!response.ok) {
+        this.errorText = response.message ?? '文本输入失败';
+        return false;
+      }
+      this.logRelativeDebug('ime_input', `sent len=${text.length}`);
+      return true;
+    } catch (error) {
+      this.errorText = `文本输入失败: ${String(error)}`;
+      return false;
+    }
+  }
+
+  /**
+   * 输入框内容变化时只处理增量：变长就把新增文本发出去，变短就补等量退格。
+   * 这样中文候选词上屏、粘贴、连续输入都能正确转发。
+   */
+  private handleImeTextChange(value: string): void {
+    const previous = this.imeSentText;
+    if (value === previous) {
+      return;
+    }
+    if (value.startsWith(previous)) {
+      const appended = value.substring(previous.length);
+      if (this.sendTextToRemote(appended)) {
+        this.imeSentText = value;
+      }
+      return;
+    }
+    let shared = 0;
+    const limit = Math.min(previous.length, value.length);
+    while (shared < limit && previous.charAt(shared) === value.charAt(shared)) {
+      shared += 1;
+    }
+    const removals = previous.length - shared;
+    for (let index = 0; index < removals; index += 1) {
+      this.sendBackspaceToRemote();
+    }
+    const appended = value.substring(shared);
+    if (appended.length > 0) {
+      this.sendTextToRemote(appended);
+    }
+    this.imeSentText = value;
+  }
+
+  private sendBackspaceToRemote(): void {
+    const payload = new RustDeskKeyPayload('VK_BACK', false);
+    payload.press = true;
+    this.sendKeyPayloadObject(payload);
+  }
+
+  private toggleImeInput(): void {
+    this.imeInputVisible = !this.imeInputVisible;
+    this.imeSentText = '';
+    this.imeDraft = '';
+    if (this.imeInputVisible) {
+      this.hideSoftKeyboard();
+      // 输入条和展开的工具栏会重叠，打开时先把工具栏收回迷你条
+      this.isMiniBarExpanded = false;
+      // 组件要等状态生效后才存在，焦点请求必须排在渲染之后
+      setTimeout(() => {
+        this.getUIContext().getFocusController().requestFocus(IME_INPUT_FOCUS_ID);
+        this.logRelativeDebug('ime_focus', `requested id=${IME_INPUT_FOCUS_ID}`);
+      }, 220);
+    } else {
+      setTimeout(() => this.requestPreviewInputFocus(), 60);
+    }
+    this.logRelativeDebug('ime_toggle', `visible=${this.imeInputVisible}`);
+  }
+
   private sendKeyPayloadObject(payload: RustDeskKeyPayload): boolean {
     if (!this.isRemoteControlSessionActive()) {
       return false;
@@ -6095,6 +6182,68 @@ struct RustDeskIndex {
             .zIndex(20);
         }
 
+        // 系统输入法转发条：承接 IME 的标点、中文与 Emoji，功能键仍走 RemoteSoftKeyboard。
+        // 外层 Column 撑满并底对齐，hitTestBehavior=None 让空白区域的触摸继续透传给画面。
+        if (this.imeInputVisible) {
+          Column() {
+          Row({ space: 8 }) {
+            TextInput({ text: this.imeDraft, placeholder: '在此输入，文字会实时发送到远端' })
+              .id(IME_INPUT_FOCUS_ID)
+              .layoutWeight(1)
+              .height(44)
+              .borderRadius(12)
+              .padding({ left: 12, right: 12 })
+              .backgroundColor($r('app.color.field_background'))
+              .border({ width: 1, color: $r('app.color.field_border') })
+              .fontSize(16)
+              .fontColor($r('app.color.text_primary'))
+              .placeholderColor($r('app.color.text_secondary'))
+              .caretColor($r('app.color.brand_primary'))
+              .enableKeyboardOnFocus(true)
+              .focusable(true)
+              .enterKeyType(EnterKeyType.Send)
+              .onChange((value: string): void => {
+                this.imeDraft = value;
+                this.handleImeTextChange(value);
+              })
+              .onSubmit((): void => {
+                this.sendRemoteKeyTap('VK_RETURN');
+                this.imeDraft = '';
+                this.imeSentText = '';
+              });
+
+            Button('清空')
+              .type(ButtonType.Normal)
+              .height(44)
+              .borderRadius(12)
+              .backgroundColor($r('app.color.surface_secondary'))
+              .fontColor($r('app.color.text_primary'))
+              .fontSize(14)
+              .onClick((): void => {
+                this.imeDraft = '';
+                this.imeSentText = '';
+              });
+
+            Button('收起')
+              .type(ButtonType.Normal)
+              .height(44)
+              .borderRadius(12)
+              .backgroundColor($r('app.color.surface_secondary'))
+              .fontColor($r('app.color.text_primary'))
+              .fontSize(14)
+              .onClick((): void => this.toggleImeInput());
+          }
+          .width('100%')
+          .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+          .backgroundColor($r('app.color.mica_surface'));
+          }
+          .width('100%')
+          .height('100%')
+          .justifyContent(FlexAlign.End)
+          .hitTestBehavior(HitTestMode.None)
+          .zIndex(45);
+        }
+
         if (this.softKeyboardVisible && this.softKeyboardAvailable()) {
           Row() {
             RemoteSoftKeyboard({
@@ -6175,6 +6324,8 @@ struct RustDeskIndex {
             onOpenDisplay: () => this.openDisplaySheet(),
             onOpenQuality: () => this.openQualitySheet(),
             onToggleSoftKeyboard: () => this.toggleSoftKeyboard(),
+            imeInputVisible: this.imeInputVisible,
+            onToggleImeInput: () => this.toggleImeInput(),
             onToggleAndroidNavigation: () => {
               this.androidNavigationVisible = !this.androidNavigationVisible;
               this.preferences?.saveAndroidNavigationVisible(this.androidNavigationVisible);

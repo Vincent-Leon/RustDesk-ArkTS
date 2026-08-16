@@ -24,6 +24,7 @@ export interface SessionToolbarProps {
   androidNavigationVisible: boolean;
   softKeyboardAvailable: boolean;
   softKeyboardVisible: boolean;
+  imeInputVisible: boolean;
   audioAvailable: boolean;
   audioMuted: boolean;
   privacyModeAvailable: boolean;
@@ -43,6 +44,7 @@ export interface SessionToolbarProps {
   onOpenDisplay: () => void;
   onOpenQuality: () => void;
   onToggleSoftKeyboard: () => void;
+  onToggleImeInput: () => void;
   onToggleAndroidNavigation: () => void;
   onAudioChange: (enabled: boolean) => void;
   onPrivacyModeChange: (enabled: boolean) => void;
@@ -75,6 +77,7 @@ export struct SessionToolbar {
   @Param androidNavigationVisible: boolean = false;
   @Param softKeyboardAvailable: boolean = false;
   @Param softKeyboardVisible: boolean = false;
+  @Param imeInputVisible: boolean = false;
   @Param audioAvailable: boolean = false;
   @Param audioMuted: boolean = false;
   @Param privacyModeAvailable: boolean = false;
@@ -95,6 +98,7 @@ export struct SessionToolbar {
   @Event onOpenDisplay: () => void = () => {};
   @Event onOpenQuality: () => void = () => {};
   @Event onToggleSoftKeyboard: () => void = () => {};
+  @Event onToggleImeInput: () => void = () => {};
   @Event onToggleAndroidNavigation: () => void = () => {};
   @Event onAudioChange: (enabled: boolean) => void = (_enabled: boolean) => {};
   @Event onPrivacyModeChange: (enabled: boolean) => void = (_enabled: boolean) => {};
@@ -125,6 +129,22 @@ export struct SessionToolbar {
 
   private actionHeight(): number {
     return this.wideLayout ? 46 : 42;
+  }
+
+  // 音频与隐私模式统一用 ToolbarAction 呈现：Toggle 控件自带的开关滑块会挤占
+  // 一行的横向空间，把标签压成单字（「音」「隐」），改成按钮后标签能完整显示。
+  private audioActionLabel(): string {
+    if (!this.audioAvailable) {
+      return '音频';
+    }
+    return this.audioMuted ? '音频' : '音频开';
+  }
+
+  private privacyActionLabel(): string {
+    if (!this.privacyModeAvailable) {
+      return '隐私';
+    }
+    return this.privacyModeOn ? '隐私开' : '隐私';
   }
 
   @Builder
@@ -201,81 +221,7 @@ export struct SessionToolbar {
     });
   }
 
-  @Builder
-  private PrivacyToggle() {
-    Row({ space: $r('app.float.space_6') }) {
-      Text(this.privacyModeAvailable ? '隐私模式' : '不支持')
-        .layoutWeight(1)
-        .fontSize($r('app.float.font_label'))
-        .fontWeight(FontWeight.Medium)
-        .fontColor(this.privacyModeAvailable
-          ? $r('app.color.neu_text_primary')
-          : $r('app.color.neu_text_disabled'))
-        .maxLines(1);
 
-      Toggle({
-        type: ToggleType.Switch,
-        isOn: this.privacyModeOn,
-      })
-        .enabled(this.privacyModeAvailable)
-        .selectedColor($r('app.color.brand_primary'))
-        .switchPointColor($r('app.color.white'))
-        .onChange((enabled: boolean): void => {
-          this.onPrivacyModeChange(enabled);
-        });
-    }
-    .layoutWeight(1)
-    .height(this.actionHeight())
-    .padding({ left: $r('app.float.space_12'), right: $r('app.float.space_8') })
-    .backgroundColor($r('app.color.mica_control'))
-    .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN, {
-      adaptiveColor: AdaptiveColor.DEFAULT,
-      scale: 0.56,
-    })
-    .border({ width: 1, color: $r('app.color.mica_border') })
-    .borderRadius($r('app.float.radius_14'))
-    .shadow(ShadowStyle.OUTER_DEFAULT_SM)
-    .opacity(this.privacyModeAvailable ? 1 : 0.72)
-    .accessibilityText(this.privacyModeOn ? '隐私模式已开启' : '隐私模式已关闭');
-  }
-
-  @Builder
-  private AudioToggle() {
-    Row({ space: $r('app.float.space_6') }) {
-      Text(this.audioAvailable ? '音频' : '准备中')
-        .layoutWeight(1)
-        .fontSize($r('app.float.font_label'))
-        .fontWeight(FontWeight.Medium)
-        .fontColor(this.audioAvailable
-          ? $r('app.color.neu_text_primary')
-          : $r('app.color.neu_text_disabled'))
-        .maxLines(1);
-
-      Toggle({
-        type: ToggleType.Switch,
-        isOn: this.audioAvailable && !this.audioMuted,
-      })
-        .enabled(this.audioAvailable)
-        .selectedColor($r('app.color.brand_primary'))
-        .switchPointColor($r('app.color.white'))
-        .onChange((enabled: boolean): void => {
-          this.onAudioChange(enabled);
-        });
-    }
-    .layoutWeight(1)
-    .height(this.actionHeight())
-    .padding({ left: $r('app.float.space_12'), right: $r('app.float.space_8') })
-    .backgroundColor($r('app.color.mica_control'))
-    .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN, {
-      adaptiveColor: AdaptiveColor.DEFAULT,
-      scale: 0.56,
-    })
-    .border({ width: 1, color: $r('app.color.mica_border') })
-    .borderRadius($r('app.float.radius_14'))
-    .shadow(ShadowStyle.OUTER_DEFAULT_SM)
-    .opacity(this.audioAvailable ? 1 : 0.72)
-    .clip(true);
-  }
 
   @Builder
   private CompactAction(
@@ -537,13 +483,37 @@ export struct SessionToolbar {
             })
           }
           this.ToolbarAction({
+            label: this.imeInputVisible ? '文字开' : '文字',
+            active: this.imeInputVisible,
+            transitionId: '',
+            onClick: () => this.onToggleImeInput(),
+          })
+          this.ToolbarAction({
             label: this.unreadCount > 0 ? `聊天 ${this.unreadCount}` : '聊天',
             active: this.activeOverlayPanel === 'chat',
             transitionId: this.chatTransitionId,
             onClick: () => this.onOpenChat(),
           })
-          this.AudioToggle()
-          this.PrivacyToggle()
+          this.ToolbarAction({
+            label: this.audioActionLabel(),
+            active: this.audioAvailable && !this.audioMuted,
+            transitionId: '',
+            onClick: () => {
+              if (this.audioAvailable) {
+                this.onAudioChange(this.audioMuted);
+              }
+            },
+          })
+          this.ToolbarAction({
+            label: this.privacyActionLabel(),
+            active: this.privacyModeOn,
+            transitionId: '',
+            onClick: () => {
+              if (this.privacyModeAvailable) {
+                this.onPrivacyModeChange(!this.privacyModeOn);
+              }
+            },
+          })
         }
         .width('100%');
 
@@ -582,6 +552,12 @@ export struct SessionToolbar {
             })
           }
           this.ToolbarAction({
+            label: this.imeInputVisible ? '文字开' : '文字',
+            active: this.imeInputVisible,
+            transitionId: '',
+            onClick: () => this.onToggleImeInput(),
+          })
+          this.ToolbarAction({
             label: this.unreadCount > 0 ? `聊天 ${this.unreadCount}` : '聊天',
             active: this.activeOverlayPanel === 'chat',
             transitionId: this.chatTransitionId,
@@ -607,8 +583,26 @@ export struct SessionToolbar {
         .width('100%');
 
         Row({ space: $r('app.float.space_8') }) {
-          this.AudioToggle()
-          this.PrivacyToggle()
+          this.ToolbarAction({
+            label: this.audioActionLabel(),
+            active: this.audioAvailable && !this.audioMuted,
+            transitionId: '',
+            onClick: () => {
+              if (this.audioAvailable) {
+                this.onAudioChange(this.audioMuted);
+              }
+            },
+          })
+          this.ToolbarAction({
+            label: this.privacyActionLabel(),
+            active: this.privacyModeOn,
+            transitionId: '',
+            onClick: () => {
+              if (this.privacyModeAvailable) {
+                this.onPrivacyModeChange(!this.privacyModeOn);
+              }
+            },
+          })
           this.DangerAction('断开连接')
         }
         .width('100%');

@@ -2316,6 +2316,8 @@ struct RustDeskIndex {
     }
     if (rememberPasswordInput !== undefined) {
       this.rememberPassword = rememberPasswordInput;
+      // 记住这次的勾选，下次弹窗直接沿用，不必每轮重勾（密码明文仍不落盘）
+      this.preferences?.savePassword('', this.rememberPassword);
     }
     const password = (passwordInput ?? this.passwordDraft).trim();
     if (password.length === 0) {

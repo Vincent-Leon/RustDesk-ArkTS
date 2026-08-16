@@ -70,11 +70,12 @@ export class RustDeskPreferences {
     try {
       const rawTarget = store.getSync(TARGET_KEY, '') as string;
       const targetRecorded = store.getSync(TARGET_RECORDED_KEY, false) as boolean;
+      const remember = store.getSync(REMEMBER_PASSWORD_KEY, false) as boolean;
       this.clearLegacyPassword(store);
       return {
         target: this.normalizeLoadedTarget(rawTarget, targetRecorded),
         password: '',
-        rememberPassword: false,
+        rememberPassword: remember,
       };
     } catch (_) {
       return {
@@ -198,13 +199,22 @@ export class RustDeskPreferences {
     }
   }
 
-  savePassword(_password: string, _rememberPassword: boolean): void {
+  /**
+   * 只保存「记住密码」这个开关，密码明文一律不落盘。
+   *
+   * 密码本身由内核在登录成功后以哈希形式写进 peers/<ID>.toml，之后重连会自动
+   * 登录。这里保留开关状态，是因为它此前从不持久化，导致每次启动都归零，
+   * 用户必须在每一次连接弹窗里重新勾选，漏一次这一轮就白连。
+   */
+  savePassword(_password: string, rememberPassword: boolean): void {
     const store = this.getStore();
     if (!store) {
       return;
     }
     try {
       this.clearLegacyPassword(store);
+      store.putSync(REMEMBER_PASSWORD_KEY, rememberPassword);
+      store.flushSync();
     } catch (_) {
     }
   }
@@ -379,12 +389,11 @@ export class RustDeskPreferences {
   private clearLegacyPassword(store: preferences.Preferences): void {
     try {
       let changed = false;
+      // 明文密码依旧不落盘，密码本身由内核以哈希形式存进 peers/<ID>.toml。
+      // 但「记住密码」这个布尔状态需要保留，否则每次启动都归零，
+      // 用户必须在每一次连接弹窗里重新勾一遍才能真正保存。
       if (store.hasSync(PASSWORD_KEY)) {
         store.deleteSync(PASSWORD_KEY);
-        changed = true;
-      }
-      if (store.hasSync(REMEMBER_PASSWORD_KEY)) {
-        store.deleteSync(REMEMBER_PASSWORD_KEY);
         changed = true;
       }
       if (changed) {

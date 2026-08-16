@@ -338,6 +338,8 @@ struct RustDeskIndex {
   /** 被控机的系统登录密码，用于连接后自动解锁远端锁屏 */
   @Local osPasswordDialogVisible: boolean = false;
   @Local osPasswordDraft: string = '';
+  /** 断开后锁定远端。内核要求它与 auto-login 同时成立才会自动解锁，所以放在同一个弹窗里显式呈现 */
+  @Local osLockAfterSessionEnd: boolean = true;
   @Local softKeyboardDockTop: boolean = false;
   @Local softKeyboardX: number = 0;
   @Local softKeyboardY: number = 12;
@@ -2956,6 +2958,10 @@ struct RustDeskIndex {
       this.showPreviewModal &&
       !this.showTransferWorkspace &&
       !this.passwordDialogVisible &&
+      // 这两处也需要本地键盘：带物理键盘的 2in1 上，拦截器会把按键直接转发给
+      // 远端，导致本地输入框收不到任何字符。手机上因为走系统输入法而不受影响。
+      !this.osPasswordDialogVisible &&
+      !this.imeInputVisible &&
       this.overlayState.getActivePanel() === 'home';
   }
 
@@ -4946,22 +4952,26 @@ struct RustDeskIndex {
     const value = this.osPasswordDraft;
     try {
       this.nativeSessionBridge.setPeerOption(sessionId, 'os-password', value);
-      if (value.length > 0) {
-        this.nativeSessionBridge.setPeerOption(sessionId, 'auto-login', 'Y');
-        if (!this.nativeSessionBridge.getToggleOption(sessionId, 'lock-after-session-end')) {
-          this.nativeSessionBridge.toggleOption(sessionId, 'lock-after-session-end');
-        }
-      } else {
-        // 清空密码时一并撤掉自动登录，避免留下半启用状态
-        this.nativeSessionBridge.setPeerOption(sessionId, 'auto-login', '');
+      // 断开后锁定按用户选择设置，不再静默打开
+      const lockNow = this.nativeSessionBridge.getToggleOption(sessionId, 'lock-after-session-end');
+      if (lockNow !== this.osLockAfterSessionEnd) {
+        this.nativeSessionBridge.toggleOption(sessionId, 'lock-after-session-end');
       }
-      this.sessionMessage = value.length > 0 ? '系统密码已保存，下次连接将自动解锁' : '系统密码已清除';
+      // 自动登录只在「有密码」且「断开后锁定」都成立时才有意义，与内核判断保持一致
+      const autoLogin = value.length > 0 && this.osLockAfterSessionEnd;
+      this.nativeSessionBridge.setPeerOption(sessionId, 'auto-login', autoLogin ? 'Y' : '');
+      if (value.length === 0) {
+        this.sessionMessage = '系统密码已清除';
+      } else if (autoLogin) {
+        this.sessionMessage = '系统密码已保存，下次连接将自动解锁';
+      } else {
+        this.sessionMessage = '系统密码已保存；未开启「断开后锁定远端」，自动解锁不会生效';
+      }
       hilog.info(DOMAIN, TAG, 'os password saved empty=%{public}s', String(value.length === 0));
     } catch (error) {
       this.errorText = `保存系统密码失败: ${String(error)}`;
     }
-    this.osPasswordDraft = '';
-    this.osPasswordDialogVisible = false;
+    this.closeOsPasswordDialog();
   }
 
   private openOsPasswordDialog(): void {
@@ -4969,8 +4979,20 @@ struct RustDeskIndex {
       return;
     }
     this.osPasswordDraft = '';
+    // 读回该设备当前的锁定设置，而不是每次都假定开启
+    this.osLockAfterSessionEnd =
+      this.nativeSessionBridge.getToggleOption(this.activeSessionId, 'lock-after-session-end');
     this.osPasswordDialogVisible = true;
     this.isMiniBarExpanded = false;
+    // 让出物理键盘，否则按键会被拦截器转发到远端而不是填进输入框
+    this.syncInputInterceptor();
+  }
+
+  private closeOsPasswordDialog(): void {
+    this.osPasswordDraft = '';
+    this.osPasswordDialogVisible = false;
+    this.syncInputInterceptor();
+    setTimeout(() => this.requestPreviewInputFocus(), 60);
   }
 
   private toggleImeInput(): void {
@@ -4982,11 +5004,14 @@ struct RustDeskIndex {
       // 输入条和展开的工具栏会重叠，打开时先把工具栏收回迷你条
       this.isMiniBarExpanded = false;
       // 组件要等状态生效后才存在，焦点请求必须排在渲染之后
+      // 让出物理键盘，否则 2in1 上按键会被拦截器转发到远端而不是填进输入条
+      this.syncInputInterceptor();
       setTimeout(() => {
         this.getUIContext().getFocusController().requestFocus(IME_INPUT_FOCUS_ID);
         this.logRelativeDebug('ime_focus', `requested id=${IME_INPUT_FOCUS_ID}`);
       }, 220);
     } else {
+      this.syncInputInterceptor();
       setTimeout(() => this.requestPreviewInputFocus(), 60);
     }
     this.logRelativeDebug('ime_toggle', `visible=${this.imeInputVisible}`);
@@ -6295,6 +6320,29 @@ struct RustDeskIndex {
                 .fontSize(13)
                 .fontColor($r('app.color.text_secondary'));
 
+              Row() {
+                Column({ space: 2 }) {
+                  Text('断开后锁定远端')
+                    .width('100%')
+                    .fontSize(15)
+                    .fontColor($r('app.color.text_primary'));
+                  Text('自动解锁依赖此项，关闭后密码仍保存但不会自动输入')
+                    .width('100%')
+                    .fontSize(12)
+                    .fontColor($r('app.color.text_secondary'));
+                }
+                .layoutWeight(1)
+                .alignItems(HorizontalAlign.Start);
+
+                Toggle({ type: ToggleType.Switch, isOn: this.osLockAfterSessionEnd })
+                  .selectedColor($r('app.color.brand_primary'))
+                  .margin({ left: 12 })
+                  .onChange((value: boolean): void => {
+                    this.osLockAfterSessionEnd = value;
+                  });
+              }
+              .width('100%');
+
               TextInput({ text: this.osPasswordDraft, placeholder: '远端设备的登录密码' })
                 .type(InputType.Password)
                 .width('100%')
@@ -6320,10 +6368,7 @@ struct RustDeskIndex {
                   .backgroundColor($r('app.color.surface_secondary'))
                   .fontColor($r('app.color.text_primary'))
                   .fontSize(15)
-                  .onClick((): void => {
-                    this.osPasswordDraft = '';
-                    this.osPasswordDialogVisible = false;
-                  });
+                  .onClick((): void => this.closeOsPasswordDialog());
 
                 Button('保存')
                   .type(ButtonType.Normal)

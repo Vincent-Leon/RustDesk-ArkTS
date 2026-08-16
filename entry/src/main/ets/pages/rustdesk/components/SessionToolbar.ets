@@ -45,6 +45,7 @@ export interface SessionToolbarProps {
   onOpenQuality: () => void;
   onToggleSoftKeyboard: () => void;
   onToggleImeInput: () => void;
+  onOpenOsPassword: () => void;
   onToggleAndroidNavigation: () => void;
   onAudioChange: (enabled: boolean) => void;
   onPrivacyModeChange: (enabled: boolean) => void;
@@ -99,6 +100,7 @@ export struct SessionToolbar {
   @Event onOpenQuality: () => void = () => {};
   @Event onToggleSoftKeyboard: () => void = () => {};
   @Event onToggleImeInput: () => void = () => {};
+  @Event onOpenOsPassword: () => void = () => {};
   @Event onToggleAndroidNavigation: () => void = () => {};
   @Event onAudioChange: (enabled: boolean) => void = (_enabled: boolean) => {};
   @Event onPrivacyModeChange: (enabled: boolean) => void = (_enabled: boolean) => {};
@@ -489,6 +491,12 @@ export struct SessionToolbar {
             onClick: () => this.onToggleImeInput(),
           })
           this.ToolbarAction({
+            label: '系统密码',
+            active: false,
+            transitionId: '',
+            onClick: () => this.onOpenOsPassword(),
+          })
+          this.ToolbarAction({
             label: this.unreadCount > 0 ? `聊天 ${this.unreadCount}` : '聊天',
             active: this.activeOverlayPanel === 'chat',
             transitionId: this.chatTransitionId,
@@ -556,6 +564,12 @@ export struct SessionToolbar {
             active: this.imeInputVisible,
             transitionId: '',
             onClick: () => this.onToggleImeInput(),
+          })
+          this.ToolbarAction({
+            label: '系统密码',
+            active: false,
+            transitionId: '',
+            onClick: () => this.onOpenOsPassword(),
           })
           this.ToolbarAction({
             label: this.unreadCount > 0 ? `聊天 ${this.unreadCount}` : '聊天',

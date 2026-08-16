@@ -33,6 +33,7 @@ export interface NativeSessionBridge {
   getToggleOption(sessionId: string, option: string): boolean;
   toggleOption(sessionId: string, option: string): void;
   togglePrivacyMode(sessionId: string, implKey: string, on: boolean): void;
+  setPeerOption(sessionId: string, name: string, value: string): void;
   getRemoteAudioState(sessionId: string): RemoteAudioState;
   setRemoteAudioMuted(sessionId: string, muted: boolean): boolean;
 }
@@ -151,6 +152,11 @@ export class RustDeskNativeSessionBridge implements NativeSessionBridge {
    */
   togglePrivacyMode(sessionId: string, implKey: string, on: boolean): void {
     native.sessionTogglePrivacyMode(sessionId, implKey, on);
+  }
+
+  /** 写入 per-peer 选项，内核会加密后持久化到 peers/<ID>.toml */
+  setPeerOption(sessionId: string, name: string, value: string): void {
+    native.sessionPeerOption(sessionId, name, value);
   }
 
   getRemoteAudioState(sessionId: string): RemoteAudioState {

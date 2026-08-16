@@ -332,6 +332,9 @@ struct RustDeskIndex {
   @Local imeInputVisible: boolean = false;
   @Local imeDraft: string = '';
   private imeSentText: string = '';
+  /** 被控机的系统登录密码，用于连接后自动解锁远端锁屏 */
+  @Local osPasswordDialogVisible: boolean = false;
+  @Local osPasswordDraft: string = '';
   @Local softKeyboardDockTop: boolean = false;
   @Local softKeyboardX: number = 0;
   @Local softKeyboardY: number = 12;
@@ -4882,6 +4885,50 @@ struct RustDeskIndex {
     this.sendKeyPayloadObject(payload);
   }
 
+  /**
+   * 保存被控机的系统登录密码，让下次连接自动解锁远端锁屏。
+   *
+   * 内核的 should_auto_login() 要求三个条件同时成立才会自动输入：
+   *   os-password 非空 && lock_after_session_end && auto-login
+   * 只写密码不打开另外两项不会生效，所以这里一并设置。
+   *
+   * 密码由内核加密后写入 peers/<ID>.toml，不经过应用自己的偏好存储。
+   */
+  private saveOsPassword(): void {
+    const sessionId = this.activeSessionId;
+    if (sessionId.length === 0) {
+      return;
+    }
+    const value = this.osPasswordDraft;
+    try {
+      this.nativeSessionBridge.setPeerOption(sessionId, 'os-password', value);
+      if (value.length > 0) {
+        this.nativeSessionBridge.setPeerOption(sessionId, 'auto-login', 'Y');
+        if (!this.nativeSessionBridge.getToggleOption(sessionId, 'lock-after-session-end')) {
+          this.nativeSessionBridge.toggleOption(sessionId, 'lock-after-session-end');
+        }
+      } else {
+        // 清空密码时一并撤掉自动登录，避免留下半启用状态
+        this.nativeSessionBridge.setPeerOption(sessionId, 'auto-login', '');
+      }
+      this.sessionMessage = value.length > 0 ? '系统密码已保存，下次连接将自动解锁' : '系统密码已清除';
+      hilog.info(DOMAIN, TAG, 'os password saved empty=%{public}s', String(value.length === 0));
+    } catch (error) {
+      this.errorText = `保存系统密码失败: ${String(error)}`;
+    }
+    this.osPasswordDraft = '';
+    this.osPasswordDialogVisible = false;
+  }
+
+  private openOsPasswordDialog(): void {
+    if (this.activeSessionId.length === 0) {
+      return;
+    }
+    this.osPasswordDraft = '';
+    this.osPasswordDialogVisible = true;
+    this.isMiniBarExpanded = false;
+  }
+
   private toggleImeInput(): void {
     this.imeInputVisible = !this.imeInputVisible;
     this.imeSentText = '';
@@ -6189,6 +6236,76 @@ struct RustDeskIndex {
             .zIndex(20);
         }
 
+        // 系统登录密码：保存后由内核在下次连接时自动输入，解锁远端锁屏
+        if (this.osPasswordDialogVisible) {
+          Column() {
+            Column({ space: 12 }) {
+              Text('被控机系统密码')
+                .width('100%')
+                .fontSize(18)
+                .fontWeight(FontWeight.Bold)
+                .fontColor($r('app.color.text_primary'));
+
+              Text('保存后，下次连接会自动输入以解锁远端锁屏。留空并保存可清除。')
+                .width('100%')
+                .fontSize(13)
+                .fontColor($r('app.color.text_secondary'));
+
+              TextInput({ text: this.osPasswordDraft, placeholder: '远端设备的登录密码' })
+                .type(InputType.Password)
+                .width('100%')
+                .height(48)
+                .borderRadius(12)
+                .padding({ left: 14, right: 14 })
+                .backgroundColor($r('app.color.field_background'))
+                .border({ width: 1, color: $r('app.color.field_border') })
+                .fontSize(16)
+                .fontColor($r('app.color.text_primary'))
+                .placeholderColor($r('app.color.text_secondary'))
+                .caretColor($r('app.color.brand_primary'))
+                .onChange((value: string): void => {
+                  this.osPasswordDraft = value;
+                });
+
+              Row({ space: 12 }) {
+                Button('取消')
+                  .type(ButtonType.Normal)
+                  .layoutWeight(1)
+                  .height(44)
+                  .borderRadius(12)
+                  .backgroundColor($r('app.color.surface_secondary'))
+                  .fontColor($r('app.color.text_primary'))
+                  .fontSize(15)
+                  .onClick((): void => {
+                    this.osPasswordDraft = '';
+                    this.osPasswordDialogVisible = false;
+                  });
+
+                Button('保存')
+                  .type(ButtonType.Normal)
+                  .layoutWeight(1)
+                  .height(44)
+                  .borderRadius(12)
+                  .backgroundColor($r('app.color.brand_primary'))
+                  .fontColor($r('app.color.white'))
+                  .fontSize(15)
+                  .onClick((): void => this.saveOsPassword());
+              }
+              .width('100%');
+            }
+            .width(360)
+            .padding(20)
+            .borderRadius(18)
+            .backgroundColor($r('app.color.surface'))
+            .shadow(ShadowStyle.OUTER_DEFAULT_LG);
+          }
+          .width('100%')
+          .height('100%')
+          .justifyContent(FlexAlign.Center)
+          .backgroundColor($r('app.color.overlay'))
+          .zIndex(2100);
+        }
+
         // 系统输入法转发条：承接 IME 的标点、中文与 Emoji，功能键仍走 RemoteSoftKeyboard。
         // 外层 Column 撑满并底对齐，hitTestBehavior=None 让空白区域的触摸继续透传给画面。
         if (this.imeInputVisible) {
@@ -6333,6 +6450,7 @@ struct RustDeskIndex {
             onToggleSoftKeyboard: () => this.toggleSoftKeyboard(),
             imeInputVisible: this.imeInputVisible,
             onToggleImeInput: () => this.toggleImeInput(),
+            onOpenOsPassword: () => this.openOsPasswordDialog(),
             onToggleAndroidNavigation: () => {
               this.androidNavigationVisible = !this.androidNavigationVisible;
               this.preferences?.saveAndroidNavigationVisible(this.androidNavigationVisible);

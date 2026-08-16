@@ -159,6 +159,45 @@ export class RustDeskPreferences {
     }
   }
 
+  /**
+   * 每台远端设备单独记录的音频开关。
+   *
+   * 内核会把 disable-audio 存进 peers/<ID>.toml，但会话建立后应用又会用
+   * 「远控默认」里的全局值覆盖一次，导致用户对单台设备的选择每次重连都被冲掉。
+   * 这里单独记录用户显式改过的设备，让设备自身的选择优先于全局默认。
+   */
+  private audioKeyFor(target: string): string {
+    return `audio_enabled_${target.trim()}`;
+  }
+
+  loadPeerAudioEnabled(target: string): boolean | undefined {
+    const store = this.getStore();
+    if (!store || target.trim().length === 0) {
+      return undefined;
+    }
+    try {
+      const key = this.audioKeyFor(target);
+      if (!store.hasSync(key)) {
+        return undefined;
+      }
+      return store.getSync(key, true) as boolean;
+    } catch (_) {
+      return undefined;
+    }
+  }
+
+  savePeerAudioEnabled(target: string, enabled: boolean): void {
+    const store = this.getStore();
+    if (!store || target.trim().length === 0) {
+      return;
+    }
+    try {
+      store.putSync(this.audioKeyFor(target), enabled);
+      store.flushSync();
+    } catch (_) {
+    }
+  }
+
   savePassword(_password: string, _rememberPassword: boolean): void {
     const store = this.getStore();
     if (!store) {

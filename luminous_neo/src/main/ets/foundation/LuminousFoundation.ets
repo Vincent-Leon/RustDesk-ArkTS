@@ -19,11 +19,31 @@ export class LuminousSelectionItem {
   public readonly id: string;
   public readonly title: ResourceStr;
   public readonly subtitle: ResourceStr;
+  public readonly enabled: boolean;
 
-  constructor(id: string, title: ResourceStr, subtitle?: ResourceStr) {
+  constructor(id: string, title: ResourceStr, subtitle?: ResourceStr, enabled?: boolean) {
     this.id = id;
     this.title = title;
     this.subtitle = subtitle === undefined ? '' : subtitle;
+    this.enabled = enabled === undefined ? true : enabled;
+  }
+}
+
+/**
+ * 原库用重力传感器驱动拟物高光随设备倾斜移动。替身不做光照效果，
+ * 只保留生命周期接口，因此也不会订阅任何传感器。
+ */
+export class LuminousMotionLight {
+  static enableSensorSubscription(): void {
+  }
+
+  static disableSensorSubscription(): void {
+  }
+
+  static resume(): void {
+  }
+
+  static suspend(): void {
   }
 }
 

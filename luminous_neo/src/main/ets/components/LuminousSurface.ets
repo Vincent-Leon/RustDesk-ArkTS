@@ -89,6 +89,9 @@ export struct LuminousSegmentedControl {
   }
 
   private segmentForeground(index: number): ResourceColor {
+    if (!this.items[index].enabled) {
+      return $r('app.color.lm_disabled_text');
+    }
     return index === this.selectedIndex
       ? $r('app.color.lm_on_accent')
       : $r('app.color.lm_text_primary');
@@ -113,7 +116,9 @@ export struct LuminousSegmentedControl {
         .borderRadius(Math.max(8, this.controlHeight / 2 - 4))
         .backgroundColor(this.segmentBackground(index))
         .onClick(() => {
-          this.onChange(index);
+          if (item.enabled) {
+            this.onChange(index);
+          }
         })
       }, (item: LuminousSelectionItem) => item.id)
       }
@@ -187,9 +192,11 @@ export struct LuminousSecondaryMenu {
             Column() {
               Text(item.title)
                 .fontSize(15)
-                .fontColor(index === this.selectedIndex
-                  ? $r('app.color.lm_accent')
-                  : $r('app.color.lm_text_primary'))
+                .fontColor(!item.enabled
+                  ? $r('app.color.lm_disabled_text')
+                  : index === this.selectedIndex
+                    ? $r('app.color.lm_accent')
+                    : $r('app.color.lm_text_primary'))
                 .maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .width('100%')
@@ -200,6 +207,9 @@ export struct LuminousSecondaryMenu {
             .justifyContent(FlexAlign.Center)
             .alignItems(HorizontalAlign.Start)
             .onClick(() => {
+              if (!item.enabled) {
+                return;
+              }
               this.onChange(index);
               this.expanded = false;
             })

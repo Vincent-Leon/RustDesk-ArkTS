@@ -1,5 +1,7 @@
 export enum RemoteSessionOrientationMode {
   FOLLOW_DESKTOP = 'follow_desktop',
+  /** 跟随重力感应旋转，同时遵守系统的旋转锁定开关 */
+  AUTO_ROTATION = 'auto_rotation',
   PORTRAIT = 'portrait',
   LANDSCAPE = 'landscape',
 }
@@ -18,9 +20,8 @@ export class RemoteSessionOrientationPolicy {
       return RemoteSessionOrientationMode.LANDSCAPE;
     }
     if (normalizedDeviceType === 'phone') {
-      return remoteHeight > remoteWidth
-        ? RemoteSessionOrientationMode.PORTRAIT
-        : RemoteSessionOrientationMode.LANDSCAPE;
+      // 不按远端屏幕比例锁死方向：用户转动手机时画面应当跟着转
+      return RemoteSessionOrientationMode.AUTO_ROTATION;
     }
     return RemoteSessionOrientationMode.FOLLOW_DESKTOP;
   }

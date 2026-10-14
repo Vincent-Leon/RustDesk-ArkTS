@@ -5269,11 +5269,15 @@ struct RustDeskIndex {
     if (mode === RemoteSessionOrientationMode.LANDSCAPE) {
       return window.Orientation.LANDSCAPE;
     }
+    if (mode === RemoteSessionOrientationMode.AUTO_ROTATION) {
+      return window.Orientation.AUTO_ROTATION_RESTRICTED;
+    }
     return window.Orientation.FOLLOW_DESKTOP;
   }
 
   private shouldEnableLandscapeMultiWindow(mode: RemoteSessionOrientationMode, active: boolean): boolean {
-    return active && deviceInfo.deviceType === 'phone' && mode === RemoteSessionOrientationMode.LANDSCAPE;
+    return active && deviceInfo.deviceType === 'phone'
+      && (mode === RemoteSessionOrientationMode.LANDSCAPE || mode === RemoteSessionOrientationMode.AUTO_ROTATION);
   }
 
   private async applyLandscapeMultiWindow(
@@ -5727,7 +5731,9 @@ struct RustDeskIndex {
   }
 
   private async waitForPreviewWindowReady(): Promise<void> {
-    if (this.sessionOrientationMode === RemoteSessionOrientationMode.FOLLOW_DESKTOP) {
+    // 只有锁定了目标方向时才需要等窗口转到位
+    if (this.sessionOrientationMode === RemoteSessionOrientationMode.FOLLOW_DESKTOP
+      || this.sessionOrientationMode === RemoteSessionOrientationMode.AUTO_ROTATION) {
       await new Promise<void>((resolve) => setTimeout(() => resolve(), 80));
       return;
     }

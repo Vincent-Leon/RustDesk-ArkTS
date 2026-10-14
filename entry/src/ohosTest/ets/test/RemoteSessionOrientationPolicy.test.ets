@@ -6,11 +6,11 @@ import {
 
 export default function remoteSessionOrientationPolicyTest(): void {
   describe('RemoteSessionOrientationPolicyTest', () => {
-    it('uses the remote display aspect ratio on phones', 0, () => {
+    it('lets phones rotate with the device regardless of the remote aspect ratio', 0, () => {
       expect(RemoteSessionOrientationPolicy.resolve('phone', 1080, 2400))
-        .assertEqual(RemoteSessionOrientationMode.PORTRAIT);
+        .assertEqual(RemoteSessionOrientationMode.AUTO_ROTATION);
       expect(RemoteSessionOrientationPolicy.resolve('phone', 2400, 1080))
-        .assertEqual(RemoteSessionOrientationMode.LANDSCAPE);
+        .assertEqual(RemoteSessionOrientationMode.AUTO_ROTATION);
     });
 
     it('lets tablets follow the device rotation', 0, () => {

@@ -429,42 +429,24 @@ export struct SessionToolbar {
     });
   }
 
-  @Builder
-  private AudioToggle() {
-    Row({ space: $r('app.float.space_6') }) {
-      Text(this.audioAvailable ? '音频' : '准备中')
-        .layoutWeight(1)
-        .fontSize($r('app.float.font_label'))
-        .fontWeight(FontWeight.Medium)
-        .fontColor(this.audioAvailable
-          ? $r('app.color.neu_text_primary')
-          : $r('app.color.neu_text_disabled'))
-        .maxLines(1);
-
-      Toggle({
-        type: ToggleType.Switch,
-        isOn: this.audioAvailable && !this.audioMuted,
-      })
-        .enabled(this.audioAvailable)
-        .selectedColor($r('app.color.brand_primary'))
-        .switchPointColor($r('app.color.white'))
-        .onChange((enabled: boolean): void => {
-          this.onAudioChange(enabled);
-        });
+  // 音频用按钮呈现：Toggle 自带的滑块会占掉一格的大部分宽度，
+  // 一行放满时标签会被挤成单字甚至消失
+  private audioActionLabel(): string {
+    if (!this.audioAvailable) {
+      return '音频';
     }
-    .width(this.actionButtonWidth())
-    .height(this.actionHeight())
-    .padding({ left: $r('app.float.space_12'), right: $r('app.float.space_8') })
-    .backgroundColor($r('app.color.mica_control'))
-    .backgroundBlurStyle(BlurStyle.COMPONENT_ULTRA_THIN, {
-      adaptiveColor: AdaptiveColor.DEFAULT,
-      scale: 0.56,
+    return this.audioMuted ? '音频' : '音频开';
+  }
+
+  @Builder
+  private AudioAction() {
+    this.ToolbarAction({
+      label: this.audioActionLabel(),
+      active: this.audioAvailable && !this.audioMuted,
+      transitionId: '',
+      enabled: this.audioAvailable,
+      onClick: () => this.onAudioChange(this.audioMuted),
     })
-    .border({ width: 1, color: $r('app.color.mica_border') })
-    .borderRadius($r('app.float.radius_14'))
-    .shadow(ShadowStyle.OUTER_DEFAULT_SM)
-    .opacity(this.audioAvailable ? 1 : 0.72)
-    .clip(true);
   }
 
   @Builder
@@ -810,7 +792,7 @@ export struct SessionToolbar {
         this.SystemImeAction()
         this.SoftKeyboardAction()
         this.ChatAction()
-        this.AudioToggle()
+        this.AudioAction()
         this.PrivacyAction()
         this.OsPasswordAction()
         this.DisplayAction()
@@ -825,7 +807,7 @@ export struct SessionToolbar {
           this.SystemImeAction()
           this.SoftKeyboardAction()
           this.ChatAction()
-          this.AudioToggle()
+          this.AudioAction()
         }
         .width(this.actionGridWidth());
 
@@ -854,7 +836,7 @@ export struct SessionToolbar {
 
         Row({ space: $r('app.float.space_8') }) {
           this.ChatAction()
-          this.AudioToggle()
+          this.AudioAction()
         }
         .width(this.actionGridWidth());
 

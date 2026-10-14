@@ -2,7 +2,11 @@ import { LuminousNeoTokens, LuminousSelectionItem } from '../foundation/Luminous
 
 /**
  * 拟物化容器。depth > 0 表示浮起，depth < 0 表示内凹，0 表示纯平。
- * 调用方会在外层用 shadowPaddingFor() 预留投影空间，这里只负责自身绘制。
+ *
+ * 节点撑满父容器，主体按 surfaceWidth × surfaceHeight 居中绘制，阴影向外溢出。
+ * 调用方都给父容器显式尺寸并为阴影留出余量：多数是比主体略大的居中框，
+ * FloatingSurface / FloatingDepth 则用 (宽+2p)×(高+2p) 的框再平移 -p。
+ * 两种写法只有在「撑满并居中」时主体才会恰好落在预期位置。
  */
 @Component
 export struct LuminousSurface {
@@ -48,24 +52,29 @@ export struct LuminousSurface {
   }
 
   build(): void {
-    Stack({ alignContent: this.contentAlignment }) {
-      this.content();
+    Stack({ alignContent: Alignment.Center }) {
+      Stack({ alignContent: this.contentAlignment }) {
+        this.content();
+      }
+      .width(this.resolvedWidth())
+      .height(this.resolvedHeight())
+      .borderRadius(this.cornerRadius)
+      .backgroundColor(this.inset() ? $r('app.color.lm_field_background') : $r('app.color.lm_base'))
+      .border({
+        width: this.magnitude() > 0 ? 1 : 0,
+        color: this.inset() ? $r('app.color.lm_field_border') : $r('app.color.lm_shadow_light'),
+      })
+      .shadow({
+        radius: this.shadowRadius(),
+        color: $r('app.color.lm_shadow_dark'),
+        offsetX: this.shadowOffset(),
+        offsetY: this.shadowOffset(),
+      })
+      .animation(this.motion())
     }
-    .width(this.resolvedWidth())
-    .height(this.resolvedHeight())
-    .borderRadius(this.cornerRadius)
-    .backgroundColor(this.inset() ? $r('app.color.lm_field_background') : $r('app.color.lm_base'))
-    .border({
-      width: this.magnitude() > 0 ? 1 : 0,
-      color: this.inset() ? $r('app.color.lm_field_border') : $r('app.color.lm_shadow_light'),
-    })
-    .shadow({
-      radius: this.shadowRadius(),
-      color: $r('app.color.lm_shadow_dark'),
-      offsetX: this.shadowOffset(),
-      offsetY: this.shadowOffset(),
-    })
-    .animation(this.motion())
+    .width('100%')
+    .height('100%')
+    .clip(false)
   }
 }
 

@@ -98,11 +98,12 @@ export class RustDeskPreferences {
     try {
       const rawTarget = store.getSync(TARGET_KEY, '') as string;
       const targetRecorded = store.getSync(TARGET_RECORDED_KEY, false) as boolean;
+      const rememberPassword = store.getSync(REMEMBER_PASSWORD_KEY, false) as boolean;
       this.clearLegacyPassword(store);
       return {
         target: this.normalizeLoadedTarget(rawTarget, targetRecorded),
         password: '',
-        rememberPassword: false,
+        rememberPassword,
       };
     } catch (_) {
       return {
@@ -226,13 +227,21 @@ export class RustDeskPreferences {
     }
   }
 
-  savePassword(_password: string, _rememberPassword: boolean): void {
+  /**
+   * 只保存「记住密码」这个开关，密码明文一律不落盘。
+   *
+   * 密码本身由内核在登录成功后写进 peers/<ID>.toml，之后重连会自动登录。
+   * 开关此前从不持久化，每次启动都归零，用户必须在每一次密码弹窗里重新打开。
+   */
+  savePassword(_password: string, rememberPassword: boolean): void {
     const store = this.getStore();
     if (!store) {
       return;
     }
     try {
       this.clearLegacyPassword(store);
+      store.putSync(REMEMBER_PASSWORD_KEY, rememberPassword);
+      store.flushSync();
     } catch (_) {
     }
   }
@@ -420,12 +429,9 @@ export class RustDeskPreferences {
   private clearLegacyPassword(store: preferences.Preferences): void {
     try {
       let changed = false;
+      // 只清理旧版本存下的明文密码；「记住密码」开关本身需要保留
       if (store.hasSync(PASSWORD_KEY)) {
         store.deleteSync(PASSWORD_KEY);
-        changed = true;
-      }
-      if (store.hasSync(REMEMBER_PASSWORD_KEY)) {
-        store.deleteSync(REMEMBER_PASSWORD_KEY);
         changed = true;
       }
       if (changed) {

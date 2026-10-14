@@ -340,6 +340,8 @@ struct RustDeskIndex {
   @Local peerTarget: string = '';
   @Local passwordDraft: string = '';
   @Local rememberPassword: boolean = false;
+  /** 「记住密码」开关的持久化选择，每次打开密码弹窗都从这里恢复 */
+  private rememberPasswordPreference: boolean = false;
 
   @Local activeSessionId: string = '';
   /** 当前会话远端上报的隐私模式实现标识；为空表示远端不支持 */
@@ -1102,6 +1104,14 @@ struct RustDeskIndex {
   private applySavedSettings(settings: SavedConnectionSettings): void {
     this.peerTarget = settings.target;
     this.rememberPassword = settings.rememberPassword;
+    this.rememberPasswordPreference = settings.rememberPassword;
+  }
+
+  /** 拨动开关即保存。会话接续等内部路径会临时改写 rememberPassword，所以单独留一份用户选择 */
+  private setRememberPasswordPreference(value: boolean): void {
+    this.rememberPassword = value;
+    this.rememberPasswordPreference = value;
+    this.preferences?.savePassword('', value);
   }
 
   private copySessionDefaults(source: SessionDefaults): SessionDefaults {
@@ -2778,6 +2788,7 @@ struct RustDeskIndex {
     if (!wasVisible) {
       this.passwordDraft = '';
       this.code2faDraft = '';
+      this.rememberPassword = this.rememberPasswordPreference;
     }
     this.authChallengeMode = initialMode;
     this.authDialogMode = initialMode;
@@ -9163,7 +9174,7 @@ struct RustDeskIndex {
         code2fa: this.code2faDraft,
         trustThisDevice: this.trustThisDevice,
         onPasswordChange: (value: string) => this.passwordDraft = value,
-        onRememberChange: (value: boolean) => this.rememberPassword = value,
+        onRememberChange: (value: boolean) => this.setRememberPasswordPreference(value),
         onCode2faChange: (value: string) => this.code2faDraft = value,
         onTrustThisDeviceChange: (value: boolean) => this.trustThisDevice = value,
         onCancel: () => this.cancelPasswordDialog(),

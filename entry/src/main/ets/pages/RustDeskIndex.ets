@@ -170,6 +170,9 @@ const FALLBACK_CURSOR_BASE_WIDTH = 18;
 const FALLBACK_CURSOR_BASE_HEIGHT = 24;
 const REMOTE_CURSOR_OPTION_REAPPLY_MS = 1000;
 const WAITING_FOR_IMAGE_TEXT = 'Connected, waiting for image...';
+/** 断开前等待远端确认隐私模式已撤销的上限与轮询间隔 */
+const PRIVACY_MODE_OFF_TIMEOUT_MS = 900;
+const PRIVACY_MODE_OFF_POLL_MS = 60;
 const PREVIEW_INPUT_FOCUS_ID = 'rustdesk-preview-input-layer';
 const SYSTEM_IME_INPUT_FOCUS_ID = 'rustdesk-system-ime-input';
 const SESSION_OVERLAY_TRANSITION_CHAT = 'rustdesk-session-overlay-chat';
@@ -3153,6 +3156,43 @@ struct RustDeskIndex {
     }
   }
 
+  /**
+   * 断开前先撤销远端隐私模式，并等待回执。
+   *
+   * 临时规避被控端的一个竞态（rustdesk/rustdesk#15875）：macOS 的「会话结束后锁屏」
+   * 是另起线程注入 ⌃⌘Q，而隐私模式的黑色覆盖层是原生 AppKit 窗口。连接关闭时
+   * 两者互不等待，按键落在尚未撤掉的覆盖层上，于是开着隐私模式断开反而不锁屏。
+   * 把撤销提前到会话关闭之前，竞态就不会发生。
+   */
+  private async ensurePrivacyModeOffBeforeClose(sessionId: string): Promise<void> {
+    if (sessionId.length === 0 || this.remoteSessionTabsController.get(sessionId)?.connected !== true) {
+      return;
+    }
+    const implKey = this.privacyModeImplKeyFor(sessionId);
+    if (implKey.length === 0 || !this.nativeSessionBridge.getToggleOption(sessionId, 'privacy-mode')) {
+      return;
+    }
+    try {
+      this.nativeSessionBridge.togglePrivacyMode(sessionId, implKey, false);
+    } catch (error) {
+      hilog.warn(DOMAIN, TAG, 'privacy mode off before close failed: %{public}s', String(error));
+      return;
+    }
+    for (let waited = 0; waited < PRIVACY_MODE_OFF_TIMEOUT_MS; waited += PRIVACY_MODE_OFF_POLL_MS) {
+      await new Promise<void>((resolve: () => void): void => {
+        setTimeout(() => resolve(), PRIVACY_MODE_OFF_POLL_MS);
+      });
+      if (!this.nativeSessionBridge.getToggleOption(sessionId, 'privacy-mode')) {
+        if (sessionId === this.activeSessionId) {
+          this.privacyModeOn = false;
+        }
+        hilog.info(DOMAIN, TAG, 'privacy mode off confirmed after %{public}dms', waited + PRIVACY_MODE_OFF_POLL_MS);
+        return;
+      }
+    }
+    hilog.warn(DOMAIN, TAG, 'privacy mode off not confirmed within timeout, closing anyway');
+  }
+
   private async closeRemoteSessionTab(sessionId: string): Promise<void> {
     if (this.sessionTransitionBusy()) {
       this.queueClosedSession(sessionId);
@@ -3165,6 +3205,7 @@ struct RustDeskIndex {
     this.sessionCloseInFlight = true;
     try {
       await this.clipboardController?.cleanupIncomingRootForClosedSession(sessionId);
+      await this.ensurePrivacyModeOffBeforeClose(sessionId);
       try {
         this.nativeSessionBridge.closeSession(sessionId);
       } catch (error) {
@@ -3201,6 +3242,7 @@ struct RustDeskIndex {
       const sessionId = this.activeSessionId;
       this.rejectPendingInsecureConnection();
       hilog.info(DOMAIN, TAG, 'closeSession sessionId=%{public}s reason=%{public}s', sessionId, reason ?? '');
+      await this.ensurePrivacyModeOffBeforeClose(sessionId);
       this.hideSystemIme(false);
       this.releaseSoftKeyboardKeys();
       if (this.relativeMouseMode && sessionId) {

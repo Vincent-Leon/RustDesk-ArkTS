@@ -39,6 +39,8 @@ export interface SessionToolbarProps {
   systemImeActive: boolean;
   audioAvailable: boolean;
   audioMuted: boolean;
+  privacyModeAvailable: boolean;
+  privacyModeOn: boolean;
   wideLayout: boolean;
   transformSummary: string;
   canResetTransform: boolean;
@@ -59,6 +61,7 @@ export interface SessionToolbarProps {
   onToggleSystemIme: () => void;
   onToggleAndroidNavigation: () => void;
   onAudioChange: (enabled: boolean) => void;
+  onPrivacyModeChange: (enabled: boolean) => void;
   onDisconnect: () => void;
   onCollapse: () => void;
   onMinimizeWindow: () => void;
@@ -99,6 +102,8 @@ export struct SessionToolbar {
   @Param systemImeActive: boolean = false;
   @Param audioAvailable: boolean = false;
   @Param audioMuted: boolean = false;
+  @Param privacyModeAvailable: boolean = false;
+  @Param privacyModeOn: boolean = false;
   @Param wideLayout: boolean = false;
   @Param transformSummary: string = '100%';
   @Param canResetTransform: boolean = false;
@@ -121,6 +126,7 @@ export struct SessionToolbar {
   @Event onToggleSystemIme: () => void = () => {};
   @Event onToggleAndroidNavigation: () => void = () => {};
   @Event onAudioChange: (enabled: boolean) => void = (_enabled: boolean) => {};
+  @Event onPrivacyModeChange: (enabled: boolean) => void = (_enabled: boolean) => {};
   @Event onDisconnect: () => void = () => {};
   @Event onCollapse: () => void = () => {};
   @Event onMinimizeWindow: () => void = () => {};
@@ -363,7 +369,7 @@ export struct SessionToolbar {
 
   private actionColumnCount(): number {
     if (this.toolbarWidth >= 680) {
-      return 7;
+      return 8;
     }
     return this.toolbarWidth >= 620 ? 4 : 2;
   }
@@ -733,6 +739,24 @@ export struct SessionToolbar {
     })
   }
 
+  private privacyActionLabel(): string {
+    if (!this.privacyModeAvailable) {
+      return '隐私';
+    }
+    return this.privacyModeOn ? '隐私开' : '隐私';
+  }
+
+  @Builder
+  private PrivacyAction() {
+    this.ToolbarAction({
+      label: this.privacyActionLabel(),
+      active: this.privacyModeOn,
+      transitionId: '',
+      enabled: this.privacyModeAvailable,
+      onClick: () => this.onPrivacyModeChange(!this.privacyModeOn),
+    })
+  }
+
   @Builder
   private FunctionHome() {
     if (this.cameraSession) {
@@ -765,12 +789,13 @@ export struct SessionToolbar {
       }
       .width(this.actionGridWidth())
       .justifyContent(FlexAlign.Center);
-    } else if (this.actionColumnCount() === 7) {
+    } else if (this.actionColumnCount() === 8) {
       Row({ space: $r('app.float.space_8') }) {
         this.SystemImeAction()
         this.SoftKeyboardAction()
         this.ChatAction()
         this.AudioToggle()
+        this.PrivacyAction()
         this.DisplayAction()
         this.QualityAction()
         this.DangerAction('断开')
@@ -788,13 +813,13 @@ export struct SessionToolbar {
         .width(this.actionGridWidth());
 
         Row({ space: $r('app.float.space_8') }) {
+          this.PrivacyAction()
           this.DisplayAction()
           this.QualityAction()
           this.DangerAction('断开')
         }
         .width(this.actionGridWidth())
-        .alignItems(VerticalAlign.Center)
-        .justifyContent(FlexAlign.Center);
+        .alignItems(VerticalAlign.Center);
       }
       .width(this.actionGridWidth());
     } else {
@@ -818,10 +843,10 @@ export struct SessionToolbar {
         .width(this.actionGridWidth());
 
         Row({ space: $r('app.float.space_8') }) {
+          this.PrivacyAction()
           this.DangerAction('断开')
         }
-        .width(this.actionGridWidth())
-        .justifyContent(FlexAlign.Center);
+        .width(this.actionGridWidth());
       }
       .width(this.actionGridWidth());
     }

@@ -161,6 +161,11 @@ export class RemoteSessionTabsController {
     if (tab === undefined) {
       return;
     }
+    // sync_peer_info 只带 displays。远端改分辨率或显示器后它会替换掉保存的
+    // peer_info，这里把隐私模式等能力所在的 platform_additions 延续下来
+    if (event.platform_additions === undefined && tab.peerInfo?.platform_additions !== undefined) {
+      event.platform_additions = tab.peerInfo.platform_additions;
+    }
     tab.peerInfo = event;
     tab.connected = true;
     tab.phase = 'connected';

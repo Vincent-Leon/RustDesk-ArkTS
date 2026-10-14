@@ -80,6 +80,7 @@ import {
   sessionTakeClipboardImage as bridgeSessionTakeClipboardImage,
   sessionTakeRgbaFrame as bridgeSessionTakeRgbaFrame,
   sessionToggleOption as bridgeSessionToggleOption,
+  sessionTogglePrivacyMode as bridgeSessionTogglePrivacyMode,
   transferNextJobId as bridgeTransferNextJobId,
 } from 'rustdesk-ohrs';
 
@@ -406,6 +407,10 @@ export class RustDeskNativeApi {
 
   sessionToggleOption(sessionId: string, arg: string): void {
     bridgeSessionToggleOption(sessionId, arg);
+  }
+
+  sessionTogglePrivacyMode(sessionId: string, implKey: string, on: boolean): void {
+    bridgeSessionTogglePrivacyMode(sessionId, implKey, on);
   }
 
   transferNextJobId(): number {

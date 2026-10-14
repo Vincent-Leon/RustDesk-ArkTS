@@ -339,6 +339,9 @@ struct RustDeskIndex {
   @Local rememberPassword: boolean = false;
 
   @Local activeSessionId: string = '';
+  /** 当前会话远端上报的隐私模式实现标识；为空表示远端不支持 */
+  @Local privacyModeImplKey: string = '';
+  @Local privacyModeOn: boolean = false;
   @Local remoteSessionTabs: Array<RemoteSessionTab> = [];
   @Local activeCoreSessionId: string = '';
   @Local activeSessionKind: PrimarySessionKind = 'remote_control';
@@ -1210,6 +1213,7 @@ struct RustDeskIndex {
   }
 
   private clearActiveSessionHandoffState(): void {
+    this.resetPrivacyModeState();
     this.disableRemoteSessionSharing();
     this.activeSessionPassword = '';
     this.activeSessionShareTarget = '';
@@ -2530,6 +2534,7 @@ struct RustDeskIndex {
     this.setSessionVideoPaused(sessionId, true);
     this.nativeSessionBridge.setRemoteAudioMuted(sessionId, true);
     this.closeRemoteAudio();
+    this.resetPrivacyModeState();
     this.remoteInteractionReady = false;
     this.showPreviewModal = false;
     this.previewSurfaceVisible = false;
@@ -3002,6 +3007,7 @@ struct RustDeskIndex {
     this.remoteInteractionReady = false;
     this.clipboardFileRootSessionId = '';
     this.resetPreviewState();
+    this.resetPrivacyModeState();
     if (nextTab.uiStateCaptured) {
       this.chatStore.restore(nextTab.chatMessages, nextTab.chatUnread);
       this.chatDraft = nextTab.chatDraft;
@@ -6842,7 +6848,94 @@ struct RustDeskIndex {
     );
   }
 
+  /**
+   * 从 platform_additions 中取出远端支持的隐私模式实现。
+   * Rust 侧序列化为 [[implKey, displayName], ...]，只有 Windows 与 macOS 会上报。
+   */
+  private extractPrivacyModeImplKey(raw: string): string {
+    if (raw.length === 0) {
+      return '';
+    }
+    try {
+      const parsed = JSON.parse(raw) as Record<string, Object>;
+      const impls = parsed['supported_privacy_mode_impl'];
+      if (impls === undefined || impls === null || !Array.isArray(impls)) {
+        return '';
+      }
+      const list = impls as Array<Object>;
+      if (list.length === 0) {
+        return '';
+      }
+      const first = list[0];
+      if (Array.isArray(first)) {
+        const pair = first as Array<Object>;
+        return pair.length > 0 ? String(pair[0]) : '';
+      }
+      return String(first);
+    } catch (error) {
+      hilog.warn(DOMAIN, TAG, 'privacy mode impl parse failed: %{public}s', String(error));
+      return '';
+    }
+  }
+
+  /** 实现标识跟随各会话自己的 peer_info，后台标签页也能按会话取回 */
+  private privacyModeImplKeyFor(sessionId: string): string {
+    const peerInfo = this.remoteSessionTabsController.get(sessionId)?.peerInfo;
+    return this.extractPrivacyModeImplKey(peerInfo?.platform_additions ?? '');
+  }
+
+  private updatePrivacyModeSupport(event: NativeEvent): void {
+    const additions = event.platform_additions;
+    if (additions === undefined || additions.length === 0) {
+      return;
+    }
+    if (event.name === 'sync_platform_additions') {
+      // 切回标签页时重放的是保存下来的 peer_info，把后到的附加信息合进去
+      const peerInfo = this.remoteSessionTabsController.get(this.activeSessionId)?.peerInfo;
+      if (peerInfo !== undefined) {
+        peerInfo.platform_additions = additions;
+      }
+    }
+    const implKey = this.extractPrivacyModeImplKey(additions);
+    if (implKey !== this.privacyModeImplKey) {
+      this.privacyModeImplKey = implKey;
+      hilog.info(DOMAIN, TAG, 'privacy mode impl key: %{public}s', implKey.length > 0 ? implKey : '(none)');
+    }
+    this.refreshPrivacyModeState();
+  }
+
+  private resetPrivacyModeState(): void {
+    this.privacyModeImplKey = '';
+    this.privacyModeOn = false;
+  }
+
+  private refreshPrivacyModeState(): void {
+    if (this.activeSessionId.length === 0) {
+      this.privacyModeOn = false;
+      return;
+    }
+    this.privacyModeOn = this.nativeSessionBridge.getToggleOption(this.activeSessionId, 'privacy-mode');
+  }
+
+  private setPrivacyModeEnabled(enabled: boolean): void {
+    if (!this.isRemoteControlSessionActive() || this.privacyModeImplKey.length === 0) {
+      return;
+    }
+    // 状态以远端回推的 update_privacy_mode 为准，这里不做乐观更新
+    this.nativeSessionBridge.togglePrivacyMode(this.activeSessionId, this.privacyModeImplKey, enabled);
+    hilog.info(DOMAIN, TAG, 'privacy mode requested: impl=%{public}s on=%{public}s',
+      this.privacyModeImplKey, String(enabled));
+  }
+
   private handleSessionEvent(event: NativeEvent): void {
+    if (event.name === 'peer_info' || event.name === 'sync_platform_additions') {
+      this.updatePrivacyModeSupport(event);
+    }
+    if (event.name === 'update_privacy_mode') {
+      this.refreshPrivacyModeState();
+      hilog.info(DOMAIN, TAG, 'privacy mode state: %{public}s', String(this.privacyModeOn));
+      return;
+    }
     if (event.name === 'close') {
       this.remoteSessionTabsController.markPhase(this.activeSessionId, 'closed', '远端连接已结束');
       this.syncRemoteSessionTabs();
@@ -7066,6 +7159,14 @@ struct RustDeskIndex {
       this.sessionMessage = text;
       this.connectionSummary = '已连接，等待远端首帧';
       this.errorText = '';
+      return;
+    }
+    // 隐私模式用 msgbox 上报进入 / 退出 / 失败，都是信息性通知而非断开。
+    // 落到下面的兜底分支会被当成远端断开，主动把会话关掉。
+    if (title === 'Privacy mode') {
+      this.sessionMessage = message;
+      this.refreshPrivacyModeState();
+      hilog.info(DOMAIN, TAG, 'privacy mode notice: %{public}s state=%{public}s', text, String(this.privacyModeOn));
       return;
     }
     this.handleRemoteDisconnect(message);
@@ -7632,6 +7733,8 @@ struct RustDeskIndex {
             systemImeActive: this.systemImeActive,
             audioAvailable: this.remoteAudioState.available,
             audioMuted: this.remoteAudioState.muted,
+            privacyModeAvailable: this.isRemoteControlSessionActive() && this.privacyModeImplKey.length > 0,
+            privacyModeOn: this.privacyModeOn,
             wideLayout: this.activeSessionKind === 'remote_control' && this.previewViewWidth >= 700,
             transformSummary: this.previewTransformSummary(),
             canResetTransform: this.hasPreviewViewTransform(),
@@ -7646,6 +7749,7 @@ struct RustDeskIndex {
             onResetTransform: () => this.resetPreviewViewTransform(),
             onOpenChat: () => this.openChatDrawer(),
             onAudioChange: (enabled: boolean) => this.setRemoteAudioEnabled(enabled),
+            onPrivacyModeChange: (enabled: boolean) => this.setPrivacyModeEnabled(enabled),
             onOpenDisplay: () => this.openDisplaySheet(),
             onOpenQuality: () => this.openQualitySheet(),
             onRefreshDisplay: () => this.requestVideoRefresh(),

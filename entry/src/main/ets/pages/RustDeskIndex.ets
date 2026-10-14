@@ -4221,7 +4221,10 @@ struct RustDeskIndex {
     let state = this.nativeSessionBridge.getRemoteAudioState(this.activeSessionId);
     if (state.available && !this.remoteAudioDefaultApplied) {
       this.remoteAudioDefaultApplied = true;
-      const shouldMute = !this.activeSessionDefaults.audioEnabled;
+      // 该设备被单独设置过就用它自己的值，否则才落到「远控默认」的全局开关
+      const peerPreference = this.preferences?.loadPeerAudioEnabled(this.activeSessionShareTarget);
+      const enabled = peerPreference === undefined ? this.activeSessionDefaults.audioEnabled : peerPreference;
+      const shouldMute = !enabled;
       if (state.muted !== shouldMute) {
         this.nativeSessionBridge.setRemoteAudioMuted(this.activeSessionId, shouldMute);
         state = this.nativeSessionBridge.getRemoteAudioState(this.activeSessionId);
@@ -4259,6 +4262,8 @@ struct RustDeskIndex {
       this.errorText = '无法切换远端音频状态';
       return;
     }
+    // 用户显式改过，记到该设备名下，重连时不再被全局默认覆盖
+    this.preferences?.savePeerAudioEnabled(this.activeSessionShareTarget, enabled);
     this.refreshRemoteAudioState();
   }
 

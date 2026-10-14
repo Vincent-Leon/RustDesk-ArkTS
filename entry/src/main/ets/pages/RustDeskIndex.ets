@@ -347,6 +347,11 @@ struct RustDeskIndex {
   /** 当前会话远端上报的隐私模式实现标识；为空表示远端不支持 */
   @Local privacyModeImplKey: string = '';
   @Local privacyModeOn: boolean = false;
+  /** 被控机的系统登录密码，用于连接后自动解锁远端锁屏 */
+  @Local osPasswordDialogVisible: boolean = false;
+  @Local osPasswordDraft: string = '';
+  /** 断开后锁定远端。内核要求它与 auto-login 同时成立才会自动解锁，所以放在同一个弹窗里显式呈现 */
+  @Local osLockAfterSessionEnd: boolean = true;
   @Local remoteSessionTabs: Array<RemoteSessionTab> = [];
   @Local activeCoreSessionId: string = '';
   @Local activeSessionKind: PrimarySessionKind = 'remote_control';
@@ -2548,6 +2553,7 @@ struct RustDeskIndex {
     this.nativeSessionBridge.setRemoteAudioMuted(sessionId, true);
     this.closeRemoteAudio();
     this.resetPrivacyModeState();
+    this.dismissOsPasswordDialog();
     this.remoteInteractionReady = false;
     this.showPreviewModal = false;
     this.previewSurfaceVisible = false;
@@ -3275,6 +3281,7 @@ struct RustDeskIndex {
       await this.applySessionFullscreen(false, true);
       this.unregisterFoldHoverListeners();
       this.passwordDialogVisible = false;
+      this.dismissOsPasswordDialog();
       this.showPreviewModal = false;
       const shouldRestoreMainTab = reason !== '正在切换会话';
       this.clearActiveSessionHandoffState();
@@ -4132,6 +4139,8 @@ struct RustDeskIndex {
       this.showPreviewModal &&
       !this.showTransferWorkspace &&
       !this.passwordDialogVisible &&
+      // 带物理键盘的 2in1 上，拦截器会把按键直接转发给远端，本地输入框收不到字符
+      !this.osPasswordDialogVisible &&
       this.overlayState.getActivePanel() === 'home';
   }
 
@@ -6985,6 +6994,71 @@ struct RustDeskIndex {
       this.privacyModeImplKey, String(enabled));
   }
 
+  /**
+   * 保存被控机的系统登录密码，让之后的连接自动解锁远端锁屏。
+   *
+   * 内核的 should_auto_login() 要求三个条件同时成立才会自动输入：
+   *   os-password 非空 && lock-after-session-end && auto-login
+   * 密码由内核写入 peers/<ID>.toml，不经过应用自己的偏好存储。
+   */
+  private saveOsPassword(): void {
+    const sessionId = this.activeSessionId;
+    if (sessionId.length === 0) {
+      return;
+    }
+    const value = this.osPasswordDraft;
+    try {
+      this.nativeSessionBridge.setPeerOption(sessionId, 'os-password', value);
+      // 断开后锁定按用户的选择设置，不静默打开
+      const lockNow = this.nativeSessionBridge.getToggleOption(sessionId, 'lock-after-session-end');
+      if (lockNow !== this.osLockAfterSessionEnd) {
+        this.nativeSessionBridge.toggleOption(sessionId, 'lock-after-session-end');
+      }
+      // 自动登录只在「有密码」且「断开后锁定」都成立时才有意义，与内核的判断保持一致
+      const autoLogin = value.length > 0 && this.osLockAfterSessionEnd;
+      this.nativeSessionBridge.setPeerOption(sessionId, 'auto-login', autoLogin ? 'Y' : '');
+      if (value.length === 0) {
+        this.sessionMessage = '系统密码已清除';
+      } else if (autoLogin) {
+        this.sessionMessage = '系统密码已保存，下次连接将自动解锁';
+      } else {
+        this.sessionMessage = '系统密码已保存；未开启「断开后锁定远端」，自动解锁不会生效';
+      }
+      hilog.info(DOMAIN, TAG, 'os password saved empty=%{public}s autoLogin=%{public}s',
+        String(value.length === 0), String(autoLogin));
+    } catch (error) {
+      this.errorText = `保存系统密码失败: ${String(error)}`;
+    }
+    this.closeOsPasswordDialog();
+  }
+
+  private openOsPasswordDialog(): void {
+    if (!this.isRemoteControlSessionActive()) {
+      return;
+    }
+    this.osPasswordDraft = '';
+    // 读回该设备当前的锁定设置，而不是每次都假定开启
+    this.osLockAfterSessionEnd =
+      this.nativeSessionBridge.getToggleOption(this.activeSessionId, 'lock-after-session-end');
+    this.osPasswordDialogVisible = true;
+    this.isMiniBarExpanded = false;
+    // 让出物理键盘，否则按键会被拦截器转发到远端，而不是填进输入框
+    this.syncInputInterceptor();
+  }
+
+  private closeOsPasswordDialog(): void {
+    this.osPasswordDraft = '';
+    this.osPasswordDialogVisible = false;
+    this.syncInputInterceptor();
+    setTimeout(() => this.requestPreviewInputFocus(), 60);
+  }
+
+  /** 弹窗属于当前会话，会话挂起或关闭时直接收起，不做焦点恢复 */
+  private dismissOsPasswordDialog(): void {
+    this.osPasswordDraft = '';
+    this.osPasswordDialogVisible = false;
+  }
+
   private handleSessionEvent(event: NativeEvent): void {
     if (event.name === 'peer_info' || event.name === 'sync_platform_additions') {
       this.updatePrivacyModeSupport(event);
@@ -7793,6 +7867,7 @@ struct RustDeskIndex {
             audioMuted: this.remoteAudioState.muted,
             privacyModeAvailable: this.isRemoteControlSessionActive() && this.privacyModeImplKey.length > 0,
             privacyModeOn: this.privacyModeOn,
+            osPasswordAvailable: this.isRemoteControlSessionActive() && this.sessionPhase === 'connected',
             wideLayout: this.activeSessionKind === 'remote_control' && this.previewViewWidth >= 700,
             transformSummary: this.previewTransformSummary(),
             canResetTransform: this.hasPreviewViewTransform(),
@@ -7808,6 +7883,7 @@ struct RustDeskIndex {
             onOpenChat: () => this.openChatDrawer(),
             onAudioChange: (enabled: boolean) => this.setRemoteAudioEnabled(enabled),
             onPrivacyModeChange: (enabled: boolean) => this.setPrivacyModeEnabled(enabled),
+            onOpenOsPassword: () => this.openOsPasswordDialog(),
             onOpenDisplay: () => this.openDisplaySheet(),
             onOpenQuality: () => this.openQualitySheet(),
             onRefreshDisplay: () => this.requestVideoRefresh(),
@@ -9138,6 +9214,101 @@ struct RustDeskIndex {
     }
   }
 
+  /** 系统登录密码弹窗：保存后由内核在之后的连接中自动输入，解锁远端锁屏 */
+  @Builder
+  private OsPasswordDialog() {
+    if (this.osPasswordDialogVisible) {
+      Column() {
+        Column({ space: 12 }) {
+          Text('被控机系统密码')
+            .width('100%')
+            .fontSize(18)
+            .fontWeight(FontWeight.Bold)
+            .fontColor($r('app.color.text_primary'));
+
+          Text('保存后，之后连接会自动输入以解锁远端锁屏。留空并保存可清除。')
+            .width('100%')
+            .fontSize(13)
+            .fontColor($r('app.color.text_secondary'));
+
+          Row() {
+            Column({ space: 2 }) {
+              Text('断开后锁定远端')
+                .width('100%')
+                .fontSize(15)
+                .fontColor($r('app.color.text_primary'));
+              Text('自动解锁依赖此项，关闭后密码仍保存但不会自动输入')
+                .width('100%')
+                .fontSize(12)
+                .fontColor($r('app.color.text_secondary'));
+            }
+            .layoutWeight(1)
+            .alignItems(HorizontalAlign.Start);
+
+            Toggle({ type: ToggleType.Switch, isOn: this.osLockAfterSessionEnd })
+              .selectedColor($r('app.color.brand_primary'))
+              .margin({ left: 12 })
+              .onChange((value: boolean): void => {
+                this.osLockAfterSessionEnd = value;
+              });
+          }
+          .width('100%');
+
+          TextInput({ text: this.osPasswordDraft, placeholder: '远端设备的登录密码' })
+            .type(InputType.Password)
+            .width('100%')
+            .height(48)
+            .borderRadius(12)
+            .padding({ left: 14, right: 14 })
+            .backgroundColor($r('app.color.field_background'))
+            .border({ width: 1, color: $r('app.color.field_border') })
+            .fontSize(16)
+            .fontColor($r('app.color.text_primary'))
+            .placeholderColor($r('app.color.text_secondary'))
+            .caretColor($r('app.color.brand_primary'))
+            .onChange((value: string): void => {
+              this.osPasswordDraft = value;
+            })
+            .onSubmit((): void => this.saveOsPassword());
+
+          Row({ space: 12 }) {
+            Button('取消')
+              .type(ButtonType.Normal)
+              .layoutWeight(1)
+              .height(44)
+              .borderRadius(12)
+              .backgroundColor($r('app.color.surface_secondary'))
+              .fontColor($r('app.color.text_primary'))
+              .fontSize(15)
+              .onClick((): void => this.closeOsPasswordDialog());
+
+            Button('保存')
+              .type(ButtonType.Normal)
+              .layoutWeight(1)
+              .height(44)
+              .borderRadius(12)
+              .backgroundColor($r('app.color.brand_primary'))
+              .fontColor($r('app.color.white'))
+              .fontSize(15)
+              .onClick((): void => this.saveOsPassword());
+          }
+          .width('100%');
+        }
+        .width('88%')
+        .constraintSize({ maxWidth: 400 })
+        .padding(20)
+        .borderRadius(18)
+        .backgroundColor($r('app.color.surface'))
+        .shadow(ShadowStyle.OUTER_DEFAULT_LG);
+      }
+      .width('100%')
+      .height('100%')
+      .justifyContent(FlexAlign.Center)
+      .backgroundColor($r('app.color.overlay'))
+      .zIndex(2050);
+    }
+  }
+
   build() {
     Stack() {
       Stack({ alignContent: Alignment.Top }) {
@@ -9181,6 +9352,8 @@ struct RustDeskIndex {
         onSubmit: () => this.submitPassword(),
       })
       .zIndex(2000)
+
+      this.OsPasswordDialog();
 
       InsecureConnectionDialog({
         visible: this.insecureConnectionDialogVisible,

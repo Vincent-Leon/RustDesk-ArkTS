@@ -41,6 +41,7 @@ export interface SessionToolbarProps {
   audioMuted: boolean;
   privacyModeAvailable: boolean;
   privacyModeOn: boolean;
+  osPasswordAvailable: boolean;
   wideLayout: boolean;
   transformSummary: string;
   canResetTransform: boolean;
@@ -62,6 +63,7 @@ export interface SessionToolbarProps {
   onToggleAndroidNavigation: () => void;
   onAudioChange: (enabled: boolean) => void;
   onPrivacyModeChange: (enabled: boolean) => void;
+  onOpenOsPassword: () => void;
   onDisconnect: () => void;
   onCollapse: () => void;
   onMinimizeWindow: () => void;
@@ -104,6 +106,7 @@ export struct SessionToolbar {
   @Param audioMuted: boolean = false;
   @Param privacyModeAvailable: boolean = false;
   @Param privacyModeOn: boolean = false;
+  @Param osPasswordAvailable: boolean = false;
   @Param wideLayout: boolean = false;
   @Param transformSummary: string = '100%';
   @Param canResetTransform: boolean = false;
@@ -127,6 +130,7 @@ export struct SessionToolbar {
   @Event onToggleAndroidNavigation: () => void = () => {};
   @Event onAudioChange: (enabled: boolean) => void = (_enabled: boolean) => {};
   @Event onPrivacyModeChange: (enabled: boolean) => void = (_enabled: boolean) => {};
+  @Event onOpenOsPassword: () => void = () => {};
   @Event onDisconnect: () => void = () => {};
   @Event onCollapse: () => void = () => {};
   @Event onMinimizeWindow: () => void = () => {};
@@ -368,8 +372,9 @@ export struct SessionToolbar {
   }
 
   private actionColumnCount(): number {
-    if (this.toolbarWidth >= 680) {
-      return 8;
+    // 一行 9 个时，4 个字的标签（14fp）加内边距至少需要 72vp 宽
+    if (this.toolbarWidth >= 720) {
+      return 9;
     }
     return this.toolbarWidth >= 620 ? 4 : 2;
   }
@@ -758,6 +763,17 @@ export struct SessionToolbar {
   }
 
   @Builder
+  private OsPasswordAction() {
+    this.ToolbarAction({
+      label: '系统密码',
+      active: false,
+      transitionId: '',
+      enabled: this.osPasswordAvailable,
+      onClick: () => this.onOpenOsPassword(),
+    })
+  }
+
+  @Builder
   private FunctionHome() {
     if (this.cameraSession) {
       Row({ space: $r('app.float.space_8') }) {
@@ -789,13 +805,14 @@ export struct SessionToolbar {
       }
       .width(this.actionGridWidth())
       .justifyContent(FlexAlign.Center);
-    } else if (this.actionColumnCount() === 8) {
+    } else if (this.actionColumnCount() === 9) {
       Row({ space: $r('app.float.space_8') }) {
         this.SystemImeAction()
         this.SoftKeyboardAction()
         this.ChatAction()
         this.AudioToggle()
         this.PrivacyAction()
+        this.OsPasswordAction()
         this.DisplayAction()
         this.QualityAction()
         this.DangerAction('断开')
@@ -814,12 +831,17 @@ export struct SessionToolbar {
 
         Row({ space: $r('app.float.space_8') }) {
           this.PrivacyAction()
+          this.OsPasswordAction()
           this.DisplayAction()
           this.QualityAction()
+        }
+        .width(this.actionGridWidth());
+
+        Row() {
           this.DangerAction('断开')
         }
         .width(this.actionGridWidth())
-        .alignItems(VerticalAlign.Center);
+        .justifyContent(FlexAlign.Center);
       }
       .width(this.actionGridWidth());
     } else {
@@ -837,16 +859,22 @@ export struct SessionToolbar {
         .width(this.actionGridWidth());
 
         Row({ space: $r('app.float.space_8') }) {
+          this.PrivacyAction()
+          this.OsPasswordAction()
+        }
+        .width(this.actionGridWidth());
+
+        Row({ space: $r('app.float.space_8') }) {
           this.DisplayAction()
           this.QualityAction()
         }
         .width(this.actionGridWidth());
 
-        Row({ space: $r('app.float.space_8') }) {
-          this.PrivacyAction()
+        Row() {
           this.DangerAction('断开')
         }
-        .width(this.actionGridWidth());
+        .width(this.actionGridWidth())
+        .justifyContent(FlexAlign.Center);
       }
       .width(this.actionGridWidth());
     }

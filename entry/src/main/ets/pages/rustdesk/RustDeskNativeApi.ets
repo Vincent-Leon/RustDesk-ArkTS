@@ -51,6 +51,7 @@ import {
   sessionInputKey as bridgeSessionInputKey,
   sessionInputString as bridgeSessionInputString,
   sessionLogin as bridgeSessionLogin,
+  sessionPeerOption as bridgeSessionPeerOption,
   sessionNextRgba as bridgeSessionNextRgba,
   sessionOnWaitingForImageDialogShow as bridgeSessionOnWaitingForImageDialogShow,
   sessionPollEvents as bridgeSessionPollEvents,
@@ -411,6 +412,10 @@ export class RustDeskNativeApi {
 
   sessionTogglePrivacyMode(sessionId: string, implKey: string, on: boolean): void {
     bridgeSessionTogglePrivacyMode(sessionId, implKey, on);
+  }
+
+  sessionPeerOption(sessionId: string, name: string, value: string): void {
+    bridgeSessionPeerOption(sessionId, name, value);
   }
 
   transferNextJobId(): number {
